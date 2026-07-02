@@ -1,0 +1,6 @@
+# The formatter multiplexer - https://github.com/numtide/treefmt
+
+[formatter.nixfmt]
+command = "nixfmt"
+includes = [ "*.nix" ]
+excludes = [ "patches/**" ]
