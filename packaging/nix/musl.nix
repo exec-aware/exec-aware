@@ -23,6 +23,7 @@ stdenv.mkDerivation (finalAttrs: {
       url = "https://www.openwall.com/lists/musl/2026/04/10/3/1";
       hash = "sha256-HuKfZPnKjorXw0l3nWYf9rUhJqJ1ddNYaYE1elLEBvs=";
     })
+    ../../patches/musl/v1.2.6/01-exec-aware-dlopen.patch
   ];
 
   env.NIX_DONT_SET_RPATH = true;
