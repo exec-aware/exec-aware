@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Skye Soss <skye@soss.website>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 {
   description = "Patches for exec-aware programs";
 
@@ -29,6 +33,7 @@
               pkgs.stgit
               pkgs.treefmt
               pkgs.nixfmt
+              pkgs.reuse
             ];
           };
         }

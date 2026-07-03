@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Skye Soss <skye@soss.website>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 CC ?= gcc
 
 .PHONY: all check clean

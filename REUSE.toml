@@ -1,0 +1,18 @@
+
+version = 1
+
+[[annotations]]
+path = [
+    "flake.lock",
+    "patches/**/series",
+    "patches/**/*.patch",
+]
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileCopyrightText = "2026 Skye Soss <skye@soss.website>"
+
+[[annotations]]
+path = [
+    "patches/musl/musl.pgp",
+]
+SPDX-License-Identifier = "CC0-1.0"
+SPDX-FileCopyrightText = "2026 musl libc <musl@libc.org>"
