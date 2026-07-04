@@ -11,8 +11,8 @@ the -e command line option, or handling the LUA_INIT environment variable.
  src/lauxlib.c |   24 ++++++++++++++++++++++--
  src/lauxlib.h |    1 +
  src/lprefix.h |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
- src/lua.c     |   22 ++++++++++++++++------
- 4 files changed, 87 insertions(+), 8 deletions(-)
+ src/lua.c     |   26 ++++++++++++++++++++------
+ 4 files changed, 91 insertions(+), 8 deletions(-)
 
 diff --git a/src/lauxlib.c b/src/lauxlib.c
 index 7cf90cb..af132d7 100644
@@ -147,7 +147,7 @@ index 484f2ad..388a83d 100644
 +
 +#endif
 diff --git a/src/lua.c b/src/lua.c
-index 5054583..7278250 100644
+index 5054583..116c3d4 100644
 --- a/src/lua.c
 +++ b/src/lua.c
 @@ -201,11 +201,15 @@ static int dochunk (lua_State *L, int status) {
@@ -167,7 +167,18 @@ index 5054583..7278250 100644
    return dochunk(L, luaL_loadbuffer(L, s, strlen(s), name));
  }
  
-@@ -260,7 +264,7 @@ static int handle_script (lua_State *L, char **argv) {
+@@ -227,6 +231,10 @@ static int dolibrary (lua_State *L, char *globname) {
+     *modname = '\0';  /* global name ends here */
+     modname++;  /* module name starts after the '=' */
+   }
++  if (exec_deny_interactive()) {
++    lua_pushfstring(L, "'-l %s' blocked by EXEC_DENY_INTERACTIVE", modname);
++    return report(L, LUA_ERRRUN);
++  }
+   lua_getglobal(L, "require");
+   lua_pushstring(L, modname);
+   status = docall(L, 1, 1);  /* call 'require(modname)' */
+@@ -260,7 +268,7 @@ static int handle_script (lua_State *L, char **argv) {
    const char *fname = argv[0];
    if (strcmp(fname, "-") == 0 && strcmp(argv[-1], "--") != 0)
      fname = NULL;  /* stdin */
@@ -176,7 +187,7 @@ index 5054583..7278250 100644
    if (status == LUA_OK) {
      int n = pushargs(L);  /* push arguments to script */
      status = docall(L, n, LUA_MULTRET);
-@@ -674,9 +678,13 @@ static void l_print (lua_State *L) {
+@@ -674,9 +682,13 @@ static void l_print (lua_State *L) {
  ** Do the REPL: repeatedly read (load) a line, evaluate (call) it, and
  ** print any results.
  */
@@ -191,7 +202,7 @@ index 5054583..7278250 100644
    progname = NULL;  /* no 'progname' on errors in interactive mode */
    lua_initreadline(L);
    while ((status = loadline(L)) != -1) {
-@@ -688,6 +696,7 @@ static void doREPL (lua_State *L) {
+@@ -688,6 +700,7 @@ static void doREPL (lua_State *L) {
    lua_settop(L, 0);  /* clear stack */
    lua_writeline();
    progname = oldprogname;
@@ -199,7 +210,7 @@ index 5054583..7278250 100644
  }
  
  /* }================================================================== */
-@@ -732,12 +741,13 @@ static int pmain (lua_State *L) {
+@@ -732,12 +745,13 @@ static int pmain (lua_State *L) {
      if (handle_script(L, argv + script) != LUA_OK)
        return 0;  /* interrupt in case of error */
    }
