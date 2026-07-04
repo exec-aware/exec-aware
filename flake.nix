@@ -52,13 +52,14 @@
               src = pkgs.fetchFromGitHub {
                 owner = "Skyb0rg007";
                 repo = "util-linux";
-                rev = "6d407908452cb50522d3a8ae8974f24499b43237";
-                hash = "sha256-kvLDkFcF37NnOEoVbx9XcAcRfRC4+I6MHcGBI2T1KYQ=";
+                rev = "87397f60013a9bfb4054ae1d673b8f9a0cef6062";
+                hash = "sha256-0jc6M0uV9Zq3IrN1Cf/99ksWX/FJrZvNbK0DAkujcVA=";
               };
               patches = [ ];
               preConfigure = "./autogen.sh";
               nativeBuildInputs = prevAttrs.nativeBuildInputs ++ [
-                pkgs.autoreconfHook
+                pkgs.libtool
+                pkgs.automake
                 pkgs.flex
                 pkgs.bison
                 pkgs.gettext
