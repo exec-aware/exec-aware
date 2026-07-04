@@ -1,0 +1,211 @@
+implement executable awareness for lua
+
+From: Skye Soss <skye@soss.website>
+
+
+---
+ src/lauxlib.c |   24 ++++++++++++++++++++++--
+ src/lauxlib.h |    1 +
+ src/lprefix.h |   45 +++++++++++++++++++++++++++++++++++++++++++++
+ src/lua.c     |   22 ++++++++++++++++------
+ 4 files changed, 84 insertions(+), 8 deletions(-)
+
+diff --git a/src/lauxlib.c b/src/lauxlib.c
+index 7cf90cb..af132d7 100644
+--- a/src/lauxlib.c
++++ b/src/lauxlib.c
+@@ -805,8 +805,8 @@ static int skipcomment (FILE *f, int *cp) {
+ }
+ 
+ 
+-LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
+-                                             const char *mode) {
++static int loadfilex_impl (lua_State *L, const char *filename,
++                           const char *mode, int checkexec) {
+   LoadF lf;
+   int status, readstatus;
+   int c;
+@@ -814,12 +814,21 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
+   if (filename == NULL) {
+     lua_pushliteral(L, "=stdin");
+     lf.f = stdin;
++    if (checkexec && check_fd_exec(0) < 0 && exec_deny_interactive()) {
++      errno = EACCES;
++      return errfile(L, "execute", fnameindex);
++    }
+   }
+   else {
+     lua_pushfstring(L, "@%s", filename);
+     errno = 0;
+     lf.f = fopen(filename, "r");
+     if (lf.f == NULL) return errfile(L, "open", fnameindex);
++    if (checkexec && check_fd_exec(fileno(lf.f)) < 0 && exec_restrict_file()) {
++      fclose(lf.f);
++      errno = EACCES;
++      return errfile(L, "execute", fnameindex);
++    }
+   }
+   lf.n = 0;
+   if (skipcomment(lf.f, &c))  /* read initial portion */
+@@ -848,6 +857,17 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
+ }
+ 
+ 
++LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
++                                             const char *mode) {
++  return loadfilex_impl(L, filename, mode, 0);
++}
++
++
++LUALIB_API int luaL_loadfile_exec (lua_State *L, const char *filename) {
++  return loadfilex_impl(L, filename, NULL, 1);
++}
++
++
+ typedef struct LoadS {
+   const char *s;
+   size_t size;
+diff --git a/src/lauxlib.h b/src/lauxlib.h
+index 7f1d3ca..6288b07 100644
+--- a/src/lauxlib.h
++++ b/src/lauxlib.h
+@@ -94,6 +94,7 @@ LUALIB_API void (luaL_unref) (lua_State *L, int t, int ref);
+ 
+ LUALIB_API int (luaL_loadfilex) (lua_State *L, const char *filename,
+                                                const char *mode);
++LUALIB_API int (luaL_loadfile_exec) (lua_State *L, const char *filename);
+ 
+ #define luaL_loadfile(L,f)	luaL_loadfilex(L,f,NULL)
+ 
+diff --git a/src/lprefix.h b/src/lprefix.h
+index 484f2ad..245d216 100644
+--- a/src/lprefix.h
++++ b/src/lprefix.h
+@@ -13,6 +13,16 @@
+ */
+ #if !defined(LUA_USE_C89)	/* { */
+ 
++/* kernel 6.14+ executability checks; enabled for the Linux build target */
++#if defined(LUA_USE_LINUX) && !defined(LUA_USE_EXECAWARE)
++#define LUA_USE_EXECAWARE
++#endif
++
++/* execveat() and AT_EMPTY_PATH require _GNU_SOURCE on glibc */
++#if defined(LUA_USE_EXECAWARE) && !defined(_GNU_SOURCE)
++#define _GNU_SOURCE
++#endif
++
+ #if !defined(_XOPEN_SOURCE)
+ #define _XOPEN_SOURCE           600
+ #elif _XOPEN_SOURCE == 0
+@@ -41,5 +51,40 @@
+ 
+ #endif			/* } */
+ 
++
++#if defined(LUA_USE_EXECAWARE)
++
++#include <errno.h>
++#include <fcntl.h>
++#include <sys/prctl.h>
++#include <unistd.h>
++
++/* from <linux/fcntl.h>; not yet in glibc headers */
++#ifndef AT_EXECVE_CHECK
++#define AT_EXECVE_CHECK 0x10000
+ #endif
++/* from <linux/securebits.h> */
++#define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
++#define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
+ 
++static inline int check_fd_exec (int fd) {
++  return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
++}
++static inline int exec_restrict_file (void) {
++  int secbits = prctl(PR_GET_SECUREBITS);
++  return secbits >= 0 && (secbits & SECBIT_EXEC_RESTRICT_FILE);
++}
++static inline int exec_deny_interactive (void) {
++  int secbits = prctl(PR_GET_SECUREBITS);
++  return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
++}
++
++#else
++
++static inline int check_fd_exec (int fd) { (void)fd; return 0; }
++static inline int exec_restrict_file (void) { return 0; }
++static inline int exec_deny_interactive (void) { return 0; }
++
++#endif
++
++#endif
+diff --git a/src/lua.c b/src/lua.c
+index 5054583..7278250 100644
+--- a/src/lua.c
++++ b/src/lua.c
+@@ -201,11 +201,15 @@ static int dochunk (lua_State *L, int status) {
+ 
+ 
+ static int dofile (lua_State *L, const char *name) {
+-  return dochunk(L, luaL_loadfile(L, name));
++  return dochunk(L, luaL_loadfile_exec(L, name));
+ }
+ 
+ 
+ static int dostring (lua_State *L, const char *s, const char *name) {
++  if (exec_deny_interactive()) {
++    lua_pushfstring(L, "'%s' blocked by EXEC_DENY_INTERACTIVE", name + 1);
++    return report(L, LUA_ERRRUN);
++  }
+   return dochunk(L, luaL_loadbuffer(L, s, strlen(s), name));
+ }
+ 
+@@ -260,7 +264,7 @@ static int handle_script (lua_State *L, char **argv) {
+   const char *fname = argv[0];
+   if (strcmp(fname, "-") == 0 && strcmp(argv[-1], "--") != 0)
+     fname = NULL;  /* stdin */
+-  status = luaL_loadfile(L, fname);
++  status = luaL_loadfile_exec(L, fname);
+   if (status == LUA_OK) {
+     int n = pushargs(L);  /* push arguments to script */
+     status = docall(L, n, LUA_MULTRET);
+@@ -674,9 +678,13 @@ static void l_print (lua_State *L) {
+ ** Do the REPL: repeatedly read (load) a line, evaluate (call) it, and
+ ** print any results.
+ */
+-static void doREPL (lua_State *L) {
++static int doREPL (lua_State *L) {
+   int status;
+   const char *oldprogname = progname;
++  if (exec_deny_interactive()) {
++    l_message(progname, "interactive mode blocked by EXEC_DENY_INTERACTIVE");
++    return 0;
++  }
+   progname = NULL;  /* no 'progname' on errors in interactive mode */
+   lua_initreadline(L);
+   while ((status = loadline(L)) != -1) {
+@@ -688,6 +696,7 @@ static void doREPL (lua_State *L) {
+   lua_settop(L, 0);  /* clear stack */
+   lua_writeline();
+   progname = oldprogname;
++  return 1;
+ }
+ 
+ /* }================================================================== */
+@@ -732,12 +741,13 @@ static int pmain (lua_State *L) {
+     if (handle_script(L, argv + script) != LUA_OK)
+       return 0;  /* interrupt in case of error */
+   }
+-  if (args & has_i)  /* -i option? */
+-    doREPL(L);  /* do read-eval-print loop */
++  if (args & has_i) {  /* -i option? */
++    if (!doREPL(L)) return 0;
++  }
+   else if (script < 1 && !(args & (has_e | has_v))) { /* no active option? */
+     if (lua_stdin_is_tty()) {  /* running in interactive mode? */
+       print_version();
+-      doREPL(L);  /* do read-eval-print loop */
++      if (!doREPL(L)) return 0;
+     }
+     else dofile(L, NULL);  /* executes stdin as a file */
+   }
