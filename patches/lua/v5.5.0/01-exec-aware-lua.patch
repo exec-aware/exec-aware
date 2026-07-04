@@ -2,13 +2,17 @@ implement executable awareness for lua
 
 From: Skye Soss <skye@soss.website>
 
-
+Add the new configuration variable LUA_USE_EXECAWARE, which controls the use of
+execveat() and the securebits. Adds the new function luaL_loadfile_exec, which
+queries EXEC_RESTRICT_FILE securebit, which is used in lua.c. The
+EXEC_DENY_INTERPRET securebit is checked before starting the REPL, performing
+the -e command line option, or handling the LUA_INIT environment variable.
 ---
  src/lauxlib.c |   24 ++++++++++++++++++++++--
  src/lauxlib.h |    1 +
- src/lprefix.h |   45 +++++++++++++++++++++++++++++++++++++++++++++
+ src/lprefix.h |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
  src/lua.c     |   22 ++++++++++++++++------
- 4 files changed, 84 insertions(+), 8 deletions(-)
+ 4 files changed, 87 insertions(+), 8 deletions(-)
 
 diff --git a/src/lauxlib.c b/src/lauxlib.c
 index 7cf90cb..af132d7 100644
@@ -78,7 +82,7 @@ index 7f1d3ca..6288b07 100644
  #define luaL_loadfile(L,f)	luaL_loadfilex(L,f,NULL)
  
 diff --git a/src/lprefix.h b/src/lprefix.h
-index 484f2ad..245d216 100644
+index 484f2ad..388a83d 100644
 --- a/src/lprefix.h
 +++ b/src/lprefix.h
 @@ -13,6 +13,16 @@
@@ -98,7 +102,7 @@ index 484f2ad..245d216 100644
  #if !defined(_XOPEN_SOURCE)
  #define _XOPEN_SOURCE           600
  #elif _XOPEN_SOURCE == 0
-@@ -41,5 +51,40 @@
+@@ -41,5 +51,43 @@
  
  #endif			/* } */
  
@@ -119,7 +123,10 @@ index 484f2ad..245d216 100644
 +#define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
  
 +static inline int check_fd_exec (int fd) {
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wnonnull"
 +  return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
++#pragma GCC diagnostic pop
 +}
 +static inline int exec_restrict_file (void) {
 +  int secbits = prctl(PR_GET_SECUREBITS);
