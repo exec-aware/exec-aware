@@ -1,0 +1,26 @@
+on:
+  workflow_dispatch: ~
+  schedule:
+    # 7:30 on Sundays
+    - cron: '30 7 * * 0'
+  push:
+    paths:
+      - 'packaging/nix/*.nix'
+      - '.github/workfllows/build-nix.yml'
+
+jobs:
+  build-nix:
+    runs-on: '${{ matrix.os }}'
+    strategy:
+      matrix:
+        os:
+          - 'ubuntu-latest'
+          - 'ubuntu-24.04-arm'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Run nix checks
+        run: |
+          nix flake check
