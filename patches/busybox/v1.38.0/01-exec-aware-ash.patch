@@ -4,15 +4,16 @@ From: Skye Soss <skye@soss.website>
 
 Check the Linux executability API before interpreting shell input from any
 source. EXEC_RESTRICT_FILE is checked for filesystem-path fds: script files
-passed as arguments and files sourced via the . builtin.
+passed as arguments, files sourced via the . builtin, and login-shell startup
+files (/etc/profile, ~/.profile, $ENV).
 EXEC_DENY_INTERACTIVE is checked for stdin (both interactive REPL and piped
 input) and -c command strings.
 ---
- shell/ash.c |   45 +++++++++++++++++++++++++++++++++++++++++++--
- 1 file changed, 43 insertions(+), 2 deletions(-)
+ shell/ash.c |   53 ++++++++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 50 insertions(+), 3 deletions(-)
 
 diff --git a/shell/ash.c b/shell/ash.c
-index fb887f3..c86159a 100644
+index fb887f3..5282769 100644
 --- a/shell/ash.c
 +++ b/shell/ash.c
 @@ -312,6 +312,35 @@ typedef long arith_t;
@@ -77,7 +78,24 @@ index fb887f3..c86159a 100644
   setarg0:
  		arg0 = *xargv++;
  	}
-@@ -15128,6 +15165,8 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
+@@ -14994,9 +15031,15 @@ procargs(char **xargv)
+ static void
+ read_profile(const char *name)
+ {
++	int fd;
+ 	name = expandstr(name, DQSYNTAX);
+-	if (setinputfile(name, INPUT_PUSH_FILE | INPUT_NOFILE_OK) < 0)
++	fd = setinputfile(name, INPUT_PUSH_FILE | INPUT_NOFILE_OK);
++	if (fd < 0)
+ 		return;
++	if (check_fd_exec(fd) < 0 && exec_restrict_file()) {
++		popfile();
++		ash_msg_and_raise_error("can't execute '%s': blocked by EXEC_RESTRICT_FILE", name);
++	}
+ 	cmdloop(0);
+ 	popfile();
+ }
+@@ -15128,6 +15171,8 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
  		// continue reading input from stdin after running 'echo'.
  		// bash does not do this: it prints "hBcs" and exits.
  		dbg_show_dirtymem("dirtymem before -c CMD");
@@ -86,7 +104,7 @@ index fb887f3..c86159a 100644
  		evalstring(minusc, EV_EXIT);
  	}
  
-@@ -15159,6 +15198,8 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
+@@ -15159,6 +15204,8 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
  # endif
  		}
  #endif

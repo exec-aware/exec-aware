@@ -4,15 +4,16 @@ From: Skye Soss <skye@soss.website>
 
 Check the Linux executability API before interpreting shell input from any
 source. EXEC_RESTRICT_FILE is checked for filesystem-path fds: script files
-passed as arguments and files sourced via the . and source builtins.
+passed as arguments, files sourced via the . and source builtins, and
+login-shell startup files (/etc/profile and ~/.profile).
 EXEC_DENY_INTERACTIVE is checked for stdin (both interactive REPL and piped
 input) and -c command strings.
 ---
- shell/hush.c |   43 +++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 43 insertions(+)
+ shell/hush.c |   47 +++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
 
 diff --git a/shell/hush.c b/shell/hush.c
-index dcc6b22..4f7f727 100644
+index dcc6b22..1b38306 100644
 --- a/shell/hush.c
 +++ b/shell/hush.c
 @@ -449,6 +449,35 @@
@@ -51,7 +52,18 @@ index dcc6b22..4f7f727 100644
  #if !ENABLE_HUSH_INTERACTIVE
  # undef ENABLE_FEATURE_EDITING
  # define ENABLE_FEATURE_EDITING 0
-@@ -11319,6 +11348,8 @@ int hush_main(int argc, char **argv)
+@@ -11251,6 +11280,10 @@ int hush_main(int argc, char **argv)
+ 		input = hfopen("/etc/profile");
+  run_profile:
+ 		if (input != NULL) {
++			if (check_fd_exec(input->fd) < 0 && exec_restrict_file()) {
++				hfclose(input);
++				bb_error_msg_and_die("can't execute profile: blocked by EXEC_RESTRICT_FILE");
++			}
+ 			parse_and_run_file(input);
+ 			hfclose(input);
+ 		}
+@@ -11319,6 +11352,8 @@ int hush_main(int argc, char **argv)
  			G.global_argc--;
  			G.global_argv++;
  		}
@@ -60,7 +72,7 @@ index dcc6b22..4f7f727 100644
  		parse_and_run_string(script);
  		goto final_return;
  	}
-@@ -11341,6 +11372,11 @@ int hush_main(int argc, char **argv)
+@@ -11341,6 +11376,11 @@ int hush_main(int argc, char **argv)
  			bb_simple_perror_msg_and_die(G.global_argv[0]);
  		}
  		xfunc_error_retval = 1;
@@ -72,7 +84,7 @@ index dcc6b22..4f7f727 100644
  		parse_and_run_file(input);
  #if ENABLE_FEATURE_CLEAN_UP
  		hfclose(input);
-@@ -11448,6 +11484,8 @@ int hush_main(int argc, char **argv)
+@@ -11448,6 +11488,8 @@ int hush_main(int argc, char **argv)
  	} /* if on tty */
  #endif /* if INTERACTIVE is allowed by build config */
  
@@ -81,7 +93,7 @@ index dcc6b22..4f7f727 100644
  	parse_and_run_file(hfopen(NULL)); /* stdin */
  
   final_return:
-@@ -12320,6 +12358,11 @@ static int FAST_FUNC builtin_source(char **argv)
+@@ -12320,6 +12362,11 @@ static int FAST_FUNC builtin_source(char **argv)
  		 */
  		return EXIT_FAILURE;
  	}
