@@ -12,7 +12,7 @@ input) and -c command strings.
  1 file changed, 43 insertions(+), 2 deletions(-)
 
 diff --git a/shell/ash.c b/shell/ash.c
-index fb887f3..0d2920d 100644
+index fb887f3..c86159a 100644
 --- a/shell/ash.c
 +++ b/shell/ash.c
 @@ -312,6 +312,35 @@ typedef long arith_t;
@@ -90,7 +90,7 @@ index fb887f3..0d2920d 100644
  # endif
  		}
  #endif
-+		if (check_fd_exec(STDIN_FILENO) < 0 && exec_deny_interactive())
++		if (sflag && check_fd_exec(STDIN_FILENO) < 0 && exec_deny_interactive())
 +			ash_msg_and_raise_error("stdin blocked by EXEC_DENY_INTERACTIVE");
   state4: /* XXX ??? - why isn't this before the "if" statement */
  		dbg_show_dirtymem("dirtymem at cmdloop");

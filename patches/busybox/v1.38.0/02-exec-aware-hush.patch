@@ -12,7 +12,7 @@ input) and -c command strings.
  1 file changed, 43 insertions(+)
 
 diff --git a/shell/hush.c b/shell/hush.c
-index dcc6b22..efddf13 100644
+index dcc6b22..4f7f727 100644
 --- a/shell/hush.c
 +++ b/shell/hush.c
 @@ -449,6 +449,35 @@
@@ -60,18 +60,18 @@ index dcc6b22..efddf13 100644
  		parse_and_run_string(script);
  		goto final_return;
  	}
-@@ -11340,6 +11371,11 @@ int hush_main(int argc, char **argv)
- 		if (!input) {
+@@ -11341,6 +11372,11 @@ int hush_main(int argc, char **argv)
  			bb_simple_perror_msg_and_die(G.global_argv[0]);
  		}
+ 		xfunc_error_retval = 1;
 +		if (check_fd_exec(input->fd) < 0 && exec_restrict_file()) {
 +			hfclose(input);
 +			bb_error_msg_and_die("can't execute '%s': blocked by EXEC_RESTRICT_FILE",
 +					G.global_argv[0]);
 +		}
- 		xfunc_error_retval = 1;
  		parse_and_run_file(input);
  #if ENABLE_FEATURE_CLEAN_UP
+ 		hfclose(input);
 @@ -11448,6 +11484,8 @@ int hush_main(int argc, char **argv)
  	} /* if on tty */
  #endif /* if INTERACTIVE is allowed by build config */
