@@ -80,6 +80,9 @@
           musl-exec-aware = pkgs.callPackage ./packaging/nix/musl-test.nix {
             musl = self.packages.${system}.musl;
           };
+          lua-exec-aware = pkgs.callPackage ./packaging/nix/lua-test.nix {
+            lua = self.packages.${system}.lua;
+          };
           busybox-exec-aware = pkgs.callPackage ./packaging/nix/busybox-test.nix {
             busybox = self.packages.${system}.busybox;
           };
