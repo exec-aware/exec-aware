@@ -11,8 +11,8 @@ the -e command line option, or handling the LUA_INIT environment variable.
  src/lauxlib.c |   24 ++++++++++++++++++++++--
  src/lauxlib.h |    1 +
  src/lprefix.h |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
- src/lua.c     |   26 ++++++++++++++++++++------
- 4 files changed, 91 insertions(+), 8 deletions(-)
+ src/lua.c     |   28 +++++++++++++++++++++-------
+ 4 files changed, 92 insertions(+), 9 deletions(-)
 
 diff --git a/src/lauxlib.c b/src/lauxlib.c
 index 7cf90cb..af132d7 100644
@@ -147,7 +147,7 @@ index 484f2ad..388a83d 100644
 +
 +#endif
 diff --git a/src/lua.c b/src/lua.c
-index 5054583..116c3d4 100644
+index 5054583..16b8472 100644
 --- a/src/lua.c
 +++ b/src/lua.c
 @@ -201,11 +201,15 @@ static int dochunk (lua_State *L, int status) {
@@ -210,7 +210,7 @@ index 5054583..116c3d4 100644
  }
  
  /* }================================================================== */
-@@ -732,12 +745,13 @@ static int pmain (lua_State *L) {
+@@ -732,14 +745,15 @@ static int pmain (lua_State *L) {
      if (handle_script(L, argv + script) != LUA_OK)
        return 0;  /* interrupt in case of error */
    }
@@ -225,5 +225,8 @@ index 5054583..116c3d4 100644
 -      doREPL(L);  /* do read-eval-print loop */
 +      if (!doREPL(L)) return 0;
      }
-     else dofile(L, NULL);  /* executes stdin as a file */
+-    else dofile(L, NULL);  /* executes stdin as a file */
++    else if (dofile(L, NULL) != LUA_OK) return 0;  /* executes stdin as a file */
    }
+   lua_pushboolean(L, 1);  /* signal no errors */
+   return 1;
