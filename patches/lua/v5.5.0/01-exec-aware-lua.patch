@@ -2,20 +2,24 @@ implement executable awareness for lua
 
 From: Skye Soss <skye@soss.website>
 
-Add the new configuration variable LUA_USE_EXECAWARE, which controls the use of
-execveat() and the securebits. Adds the new function luaL_loadfile_exec, which
-queries EXEC_RESTRICT_FILE securebit, which is used in lua.c. The
-EXEC_DENY_INTERPRET securebit is checked before starting the REPL, performing
-the -e command line option, or handling the LUA_INIT environment variable.
+Add the new configuration variable LUA_USE_EXECAWARE, which controls the use
+of execveat() and the securebits. Every path that loads Lua code from the
+filesystem is checked against EXEC_RESTRICT_FILE: the script passed on the
+command line, stdin-as-file, the dofile() and loadfile() standard library
+functions, and modules loaded via require(). EXEC_DENY_INTERACTIVE is checked
+before executing code from non-filesystem sources: the -e option, the LUA_INIT
+environment variable, the -l module option, the REPL, and the load() function.
 ---
- src/lauxlib.c |   24 ++++++++++++++++++++++--
- src/lauxlib.h |    1 +
- src/lprefix.h |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
- src/lua.c     |   28 +++++++++++++++++++++-------
- 4 files changed, 92 insertions(+), 9 deletions(-)
+ src/lauxlib.c  |   30 ++++++++++++++++++++++++++++--
+ src/lauxlib.h  |    3 +++
+ src/lbaselib.c |    8 ++++++--
+ src/loadlib.c  |    2 +-
+ src/lprefix.h  |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/lua.c      |   24 +++++++++++++++++-------
+ 6 files changed, 103 insertions(+), 12 deletions(-)
 
 diff --git a/src/lauxlib.c b/src/lauxlib.c
-index 7cf90cb..af132d7 100644
+index 7cf90cb..25176eb 100644
 --- a/src/lauxlib.c
 +++ b/src/lauxlib.c
 @@ -805,8 +805,8 @@ static int skipcomment (FILE *f, int *cp) {
@@ -51,7 +55,7 @@ index 7cf90cb..af132d7 100644
    }
    lf.n = 0;
    if (skipcomment(lf.f, &c))  /* read initial portion */
-@@ -848,6 +857,17 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
+@@ -848,6 +857,23 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
  }
  
  
@@ -66,20 +70,74 @@ index 7cf90cb..af132d7 100644
 +}
 +
 +
++LUALIB_API int luaL_loadfilex_exec (lua_State *L, const char *filename,
++                                                   const char *mode) {
++  return loadfilex_impl(L, filename, mode, 1);
++}
++
++
  typedef struct LoadS {
    const char *s;
    size_t size;
 diff --git a/src/lauxlib.h b/src/lauxlib.h
-index 7f1d3ca..6288b07 100644
+index 7f1d3ca..7bc2863 100644
 --- a/src/lauxlib.h
 +++ b/src/lauxlib.h
-@@ -94,6 +94,7 @@ LUALIB_API void (luaL_unref) (lua_State *L, int t, int ref);
+@@ -94,6 +94,9 @@ LUALIB_API void (luaL_unref) (lua_State *L, int t, int ref);
  
  LUALIB_API int (luaL_loadfilex) (lua_State *L, const char *filename,
                                                 const char *mode);
 +LUALIB_API int (luaL_loadfile_exec) (lua_State *L, const char *filename);
++LUALIB_API int (luaL_loadfilex_exec) (lua_State *L, const char *filename,
++                                                     const char *mode);
  
  #define luaL_loadfile(L,f)	luaL_loadfilex(L,f,NULL)
+ 
+diff --git a/src/lbaselib.c b/src/lbaselib.c
+index 891bb90..85397cb 100644
+--- a/src/lbaselib.c
++++ b/src/lbaselib.c
+@@ -351,7 +351,7 @@ static int luaB_loadfile (lua_State *L) {
+   const char *fname = luaL_optstring(L, 1, NULL);
+   const char *mode = getMode(L, 2);
+   int env = (!lua_isnone(L, 3) ? 3 : 0);  /* 'env' index or 0 if no 'env' */
+-  int status = luaL_loadfilex(L, fname, mode);
++  int status = luaL_loadfilex_exec(L, fname, mode);
+   return load_aux(L, status, env);
+ }
+ 
+@@ -400,6 +400,10 @@ static int luaB_load (lua_State *L) {
+   const char *s = lua_tolstring(L, 1, &l);
+   const char *mode = getMode(L, 3);
+   int env = (!lua_isnone(L, 4) ? 4 : 0);  /* 'env' index or 0 if no 'env' */
++  if (exec_deny_interactive()) {
++    lua_pushliteral(L, "load() blocked by EXEC_DENY_INTERACTIVE");
++    return load_aux(L, LUA_ERRRUN, env);
++  }
+   if (s != NULL) {  /* loading a string? */
+     const char *chunkname = luaL_optstring(L, 2, s);
+     status = luaL_loadbufferx(L, s, l, chunkname, mode);
+@@ -425,7 +429,7 @@ static int dofilecont (lua_State *L, int d1, lua_KContext d2) {
+ static int luaB_dofile (lua_State *L) {
+   const char *fname = luaL_optstring(L, 1, NULL);
+   lua_settop(L, 1);
+-  if (l_unlikely(luaL_loadfile(L, fname) != LUA_OK))
++  if (l_unlikely(luaL_loadfile_exec(L, fname) != LUA_OK))
+     return lua_error(L);
+   lua_callk(L, 0, LUA_MULTRET, 0, dofilecont);
+   return dofilecont(L, 0, 0);
+diff --git a/src/loadlib.c b/src/loadlib.c
+index 8d2e68e..d6ca4b8 100644
+--- a/src/loadlib.c
++++ b/src/loadlib.c
+@@ -541,7 +541,7 @@ static int searcher_Lua (lua_State *L) {
+   const char *name = luaL_checkstring(L, 1);
+   filename = findfile(L, name, "path", LUA_LSUBSEP);
+   if (filename == NULL) return 1;  /* module not found in this path */
+-  return checkload(L, (luaL_loadfile(L, filename) == LUA_OK), filename);
++  return checkload(L, (luaL_loadfile_exec(L, filename) == LUA_OK), filename);
+ }
+ 
  
 diff --git a/src/lprefix.h b/src/lprefix.h
 index 484f2ad..388a83d 100644
@@ -147,7 +205,7 @@ index 484f2ad..388a83d 100644
 +
 +#endif
 diff --git a/src/lua.c b/src/lua.c
-index 5054583..16b8472 100644
+index 5054583..789b6b8 100644
 --- a/src/lua.c
 +++ b/src/lua.c
 @@ -201,11 +201,15 @@ static int dochunk (lua_State *L, int status) {
@@ -167,18 +225,7 @@ index 5054583..16b8472 100644
    return dochunk(L, luaL_loadbuffer(L, s, strlen(s), name));
  }
  
-@@ -227,6 +231,10 @@ static int dolibrary (lua_State *L, char *globname) {
-     *modname = '\0';  /* global name ends here */
-     modname++;  /* module name starts after the '=' */
-   }
-+  if (exec_deny_interactive()) {
-+    lua_pushfstring(L, "'-l %s' blocked by EXEC_DENY_INTERACTIVE", modname);
-+    return report(L, LUA_ERRRUN);
-+  }
-   lua_getglobal(L, "require");
-   lua_pushstring(L, modname);
-   status = docall(L, 1, 1);  /* call 'require(modname)' */
-@@ -260,7 +268,7 @@ static int handle_script (lua_State *L, char **argv) {
+@@ -260,7 +264,7 @@ static int handle_script (lua_State *L, char **argv) {
    const char *fname = argv[0];
    if (strcmp(fname, "-") == 0 && strcmp(argv[-1], "--") != 0)
      fname = NULL;  /* stdin */
@@ -187,7 +234,7 @@ index 5054583..16b8472 100644
    if (status == LUA_OK) {
      int n = pushargs(L);  /* push arguments to script */
      status = docall(L, n, LUA_MULTRET);
-@@ -674,9 +682,13 @@ static void l_print (lua_State *L) {
+@@ -674,9 +678,13 @@ static void l_print (lua_State *L) {
  ** Do the REPL: repeatedly read (load) a line, evaluate (call) it, and
  ** print any results.
  */
@@ -202,7 +249,7 @@ index 5054583..16b8472 100644
    progname = NULL;  /* no 'progname' on errors in interactive mode */
    lua_initreadline(L);
    while ((status = loadline(L)) != -1) {
-@@ -688,6 +700,7 @@ static void doREPL (lua_State *L) {
+@@ -688,6 +696,7 @@ static void doREPL (lua_State *L) {
    lua_settop(L, 0);  /* clear stack */
    lua_writeline();
    progname = oldprogname;
@@ -210,7 +257,7 @@ index 5054583..16b8472 100644
  }
  
  /* }================================================================== */
-@@ -732,14 +745,15 @@ static int pmain (lua_State *L) {
+@@ -732,14 +741,15 @@ static int pmain (lua_State *L) {
      if (handle_script(L, argv + script) != LUA_OK)
        return 0;  /* interrupt in case of error */
    }
