@@ -1,0 +1,4 @@
+# This series applies on Git commit 55f6c299d6dac88d4d6752eac37b69986dc87909
+01-exec-aware-ash.patch
+02-exec-aware-hush.patch
+03-exec-aware-awk.patch

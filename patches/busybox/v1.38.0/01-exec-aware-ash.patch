@@ -1,0 +1,97 @@
+implement executable awareness for ash
+
+From: Skye Soss <skye@soss.website>
+
+Check the Linux executability API before interpreting shell input from any
+source. EXEC_RESTRICT_FILE is checked for filesystem-path fds: script files
+passed as arguments and files sourced via the . builtin.
+EXEC_DENY_INTERACTIVE is checked for stdin (both interactive REPL and piped
+input) and -c command strings.
+---
+ shell/ash.c |   45 +++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 43 insertions(+), 2 deletions(-)
+
+diff --git a/shell/ash.c b/shell/ash.c
+index fb887f3..0d2920d 100644
+--- a/shell/ash.c
++++ b/shell/ash.c
+@@ -312,6 +312,35 @@ typedef long arith_t;
+ # define IF_NOT_FEATURE_SH_STANDALONE(...) __VA_ARGS__
+ #endif
+ 
++/* kernel 6.14+ executability checks */
++#if defined(__linux__)
++# include <sys/prctl.h>
++/* from <linux/fcntl.h>; not yet in glibc headers */
++# ifndef AT_EXECVE_CHECK
++#  define AT_EXECVE_CHECK 0x10000
++# endif
++# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
++# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++static inline int check_fd_exec(int fd) {
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wnonnull"
++	return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
++#pragma GCC diagnostic pop
++}
++static inline int exec_restrict_file(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_RESTRICT_FILE);
++}
++static inline int exec_deny_interactive(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
++}
++#else
++static inline int check_fd_exec(int fd) { (void)fd; return 0; }
++static inline int exec_restrict_file(void) { return 0; }
++static inline int exec_deny_interactive(void) { return 0; }
++#endif
++
+ #ifndef F_DUPFD_CLOEXEC
+ # define F_DUPFD_CLOEXEC F_DUPFD
+ #endif
+@@ -14273,7 +14302,13 @@ dotcmd(int argc_ UNUSED_PARAM, char **argv_ UNUSED_PARAM)
+ 	/* This aborts if file can't be opened, which is POSIXly correct.
+ 	 * bash returns exitcode 1 instead.
+ 	 */
+-	setinputfile(fullname, INPUT_PUSH_FILE);
++	{
++		int dot_fd = setinputfile(fullname, INPUT_PUSH_FILE);
++		if (check_fd_exec(dot_fd) < 0 && exec_restrict_file()) {
++			popfile();
++			ash_msg_and_raise_error("can't execute '%s': blocked by EXEC_RESTRICT_FILE", fullname);
++		}
++	}
+ 	commandname = fullname;
+ 	status = cmdloop(0);
+ 	popfile();
+@@ -14957,7 +14992,9 @@ procargs(char **xargv)
+ 		if (*xargv)
+ 			goto setarg0;
+ 	} else if (!sflag) {
+-		setinputfile(*xargv, 0);
++		int script_fd = setinputfile(*xargv, 0);
++		if (check_fd_exec(script_fd) < 0 && exec_restrict_file())
++			ash_msg_and_raise_error("can't execute '%s': blocked by EXEC_RESTRICT_FILE", *xargv);
+  setarg0:
+ 		arg0 = *xargv++;
+ 	}
+@@ -15128,6 +15165,8 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
+ 		// continue reading input from stdin after running 'echo'.
+ 		// bash does not do this: it prints "hBcs" and exits.
+ 		dbg_show_dirtymem("dirtymem before -c CMD");
++		if (exec_deny_interactive())
++			ash_msg_and_raise_error("'-c' blocked by EXEC_DENY_INTERACTIVE");
+ 		evalstring(minusc, EV_EXIT);
+ 	}
+ 
+@@ -15159,6 +15198,8 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
+ # endif
+ 		}
+ #endif
++		if (check_fd_exec(STDIN_FILENO) < 0 && exec_deny_interactive())
++			ash_msg_and_raise_error("stdin blocked by EXEC_DENY_INTERACTIVE");
+  state4: /* XXX ??? - why isn't this before the "if" statement */
+ 		dbg_show_dirtymem("dirtymem at cmdloop");
+ 		cmdloop(1);

@@ -1,0 +1,82 @@
+implement executable awareness for awk
+
+From: Skye Soss <skye@soss.website>
+
+Check the Linux executability API before parsing AWK programs from any
+source. EXEC_RESTRICT_FILE is checked for -f FILE (a filesystem-path fd);
+EXEC_DENY_INTERACTIVE is checked for -f - (stdin as program source), -e
+PROGRAM, and inline programs supplied as a positional argument.
+---
+ editors/awk.c |   38 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 38 insertions(+)
+
+diff --git a/editors/awk.c b/editors/awk.c
+index dd8f4ac..ac388bb 100644
+--- a/editors/awk.c
++++ b/editors/awk.c
+@@ -49,6 +49,35 @@
+ #include "xregex.h"
+ #include <math.h>
+ 
++/* kernel 6.14+ executability checks */
++#if defined(__linux__)
++# include <sys/prctl.h>
++/* from <linux/fcntl.h>; not yet in glibc headers */
++# ifndef AT_EXECVE_CHECK
++#  define AT_EXECVE_CHECK 0x10000
++# endif
++# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
++# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++static inline int check_fd_exec(int fd) {
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wnonnull"
++	return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
++#pragma GCC diagnostic pop
++}
++static inline int exec_restrict_file(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_RESTRICT_FILE);
++}
++static inline int exec_deny_interactive(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
++}
++#else
++static inline int check_fd_exec(int fd) { (void)fd; return 0; }
++static inline int exec_restrict_file(void) { return 0; }
++static inline int exec_deny_interactive(void) { return 0; }
++#endif
++
+ /* This is a NOEXEC applet. Be very careful! */
+ 
+ 
+@@ -3791,6 +3820,11 @@ int awk_main(int argc UNUSED_PARAM, char **argv)
+ 			char *s;
+ 			g_progname = optarg;
+ 			fd = xopen_stdin(g_progname);
++			if (check_fd_exec(fd) < 0) {
++				if (fd == STDIN_FILENO ? exec_deny_interactive() : exec_restrict_file())
++					bb_error_msg_and_die("can't execute '%s': blocked by exec securebits",
++							g_progname);
++			}
+ 			s = xmalloc_read(fd, NULL); /* it's NUL-terminated */
+ 			if (!s)
+ 				bb_perror_msg_and_die("read error from '%s'", g_progname);
+@@ -3807,6 +3841,8 @@ int awk_main(int argc UNUSED_PARAM, char **argv)
+ #if ENABLE_FEATURE_AWK_GNU_EXTENSIONS
+ 		case 'e':
+ 			g_progname = "cmd. line";
++			if (exec_deny_interactive())
++				bb_error_msg_and_die("'-e' blocked by EXEC_DENY_INTERACTIVE");
+ 			parse_program(optarg);
+ 			got_program = 1;
+ 			break;
+@@ -3828,6 +3864,8 @@ int awk_main(int argc UNUSED_PARAM, char **argv)
+ 		if (!*argv)
+ 			bb_show_usage();
+ 		g_progname = "cmd. line";
++		if (exec_deny_interactive())
++			bb_error_msg_and_die("awk program blocked by EXEC_DENY_INTERACTIVE");
+ 		parse_program(*argv++);
+ 	}
+ 

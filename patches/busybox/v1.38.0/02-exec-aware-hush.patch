@@ -1,0 +1,95 @@
+implement executable awareness for hush
+
+From: Skye Soss <skye@soss.website>
+
+Check the Linux executability API before interpreting shell input from any
+source. EXEC_RESTRICT_FILE is checked for filesystem-path fds: script files
+passed as arguments and files sourced via the . and source builtins.
+EXEC_DENY_INTERACTIVE is checked for stdin (both interactive REPL and piped
+input) and -c command strings.
+---
+ shell/hush.c |   43 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/shell/hush.c b/shell/hush.c
+index dcc6b22..efddf13 100644
+--- a/shell/hush.c
++++ b/shell/hush.c
+@@ -449,6 +449,35 @@
+ # define IF_NOT_FEATURE_SH_STANDALONE(...) __VA_ARGS__
+ #endif
+ 
++/* kernel 6.14+ executability checks */
++#if defined(__linux__)
++# include <sys/prctl.h>
++/* from <linux/fcntl.h>; not yet in glibc headers */
++# ifndef AT_EXECVE_CHECK
++#  define AT_EXECVE_CHECK 0x10000
++# endif
++# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
++# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++static inline int check_fd_exec(int fd) {
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wnonnull"
++	return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
++#pragma GCC diagnostic pop
++}
++static inline int exec_restrict_file(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_RESTRICT_FILE);
++}
++static inline int exec_deny_interactive(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
++}
++#else
++static inline int check_fd_exec(int fd) { (void)fd; return 0; }
++static inline int exec_restrict_file(void) { return 0; }
++static inline int exec_deny_interactive(void) { return 0; }
++#endif
++
+ #if !ENABLE_HUSH_INTERACTIVE
+ # undef ENABLE_FEATURE_EDITING
+ # define ENABLE_FEATURE_EDITING 0
+@@ -11319,6 +11348,8 @@ int hush_main(int argc, char **argv)
+ 			G.global_argc--;
+ 			G.global_argv++;
+ 		}
++		if (exec_deny_interactive())
++			bb_error_msg_and_die("'-c' blocked by EXEC_DENY_INTERACTIVE");
+ 		parse_and_run_string(script);
+ 		goto final_return;
+ 	}
+@@ -11340,6 +11371,11 @@ int hush_main(int argc, char **argv)
+ 		if (!input) {
+ 			bb_simple_perror_msg_and_die(G.global_argv[0]);
+ 		}
++		if (check_fd_exec(input->fd) < 0 && exec_restrict_file()) {
++			hfclose(input);
++			bb_error_msg_and_die("can't execute '%s': blocked by EXEC_RESTRICT_FILE",
++					G.global_argv[0]);
++		}
+ 		xfunc_error_retval = 1;
+ 		parse_and_run_file(input);
+ #if ENABLE_FEATURE_CLEAN_UP
+@@ -11448,6 +11484,8 @@ int hush_main(int argc, char **argv)
+ 	} /* if on tty */
+ #endif /* if INTERACTIVE is allowed by build config */
+ 
++	if (check_fd_exec(STDIN_FILENO) < 0 && exec_deny_interactive())
++		bb_error_msg_and_die("stdin blocked by EXEC_DENY_INTERACTIVE");
+ 	parse_and_run_file(hfopen(NULL)); /* stdin */
+ 
+  final_return:
+@@ -12320,6 +12358,11 @@ static int FAST_FUNC builtin_source(char **argv)
+ 		 */
+ 		return EXIT_FAILURE;
+ 	}
++	if (check_fd_exec(input->fd) < 0 && exec_restrict_file()) {
++		hfclose(input);
++		bb_error_msg("can't execute '%s': blocked by EXEC_RESTRICT_FILE", filename);
++		return EXIT_FAILURE;
++	}
+ 
+ #if ENABLE_HUSH_FUNCTIONS
+ 	sv_flg = G_flag_return_in_progress;
