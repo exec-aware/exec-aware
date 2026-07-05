@@ -37,25 +37,28 @@ to serve to the web.
 
 ## How it should work
 
+The core principle, drawn from the [ClipOS][] project, is that exec permission
+is a property of every file's *role*, not just the top-level entry point.
+Any file an interpreter opens to execute as code must be checked — including
+entry-point scripts, sourced/included files, and module/library imports.
+
 Programs that are *exec-aware* should perform the following actions:
 
-1. Before performing any sort of "execution" on a file descriptor,
-the program must first call
-`execve(fd, "", NULL, NULL, AT_EXECVE_CHECK | AT_EMPTY_PATH)`.
-This call checks if the program should be allowed to execute the file.
+1. Call `execveat(fd, "", NULL, NULL, AT_EXECVE_CHECK | AT_EMPTY_PATH)` on
+every file descriptor opened to execute its content as code.
+This includes the script passed on the command line, files loaded via `.` or
+`source`, and files loaded via `import`, `require`, or any equivalent.
 
-2. If the call to `execve` fails (ie. the file is not executable), the
-program should query the `SECBIT_EXEC_RESTRICT_FILE` securebit.
-If set, the program must not continue to use the file descriptor.
+2. If that call fails (the file is not executable):
+    - For file descriptors opened from the filesystem by path: query
+      `SECBIT_EXEC_RESTRICT_FILE`. If set, abort.
+    - For stdin (fd 0): query `SECBIT_EXEC_DENY_INTERACTIVE`. If set, abort.
+      (Stdin has no filesystem path, so `EXEC_RESTRICT_FILE` does not apply.)
 
-These two requirements cover most of the important parts.
-But there is another check that is sometimes useful:
-
-3. Before performing any sort of "execution" on something other than a
-file descriptor, such as an environment variable or command-line argument
-(ex. `sh -c 'rm -rf /*'`), the program should first query the
-`SECBIT_EXEC_DENY_INTERACTIVE` securebit.
-If set, the program must not interpret such a program.
+3. Before executing code from a non-file-descriptor source — a command-line
+code argument such as `sh -c '…'`, or an environment variable whose value
+is code rather than a file path — query `SECBIT_EXEC_DENY_INTERACTIVE`.
+If set, the program must not interpret it.
 
 ## What this repo contains
 
@@ -68,7 +71,7 @@ consumption.
 
 ## Q/A
 
-Q: Why do you always call `execve()`, even if the securebit isn't set?
+Q: Why do you always call `execveat()`, even if the securebit isn't set?
 
 A: This enables a form of "auditing mode" for the program.
 With this call, an administrator can use eBPF or similar to determine
@@ -100,6 +103,7 @@ A: This allows the binary to run without issue on older kernels, or in
 situations where the `prctl` syscall has been disabled in some manner.
 
 [Executability Check]: https://docs.kernel.org/userspace-api/check_exec.html
+[ClipOS]: https://clip-project.github.io/
 [W^X]: https://en.wikipedia.org/wiki/W%5EX
 [eBPF]: https://ebpf.io
 [systemd]: https://systemd.io
