@@ -48,6 +48,7 @@
           musl = pkgs.callPackage ./packaging/nix/musl.nix { };
           lua = pkgs.callPackage ./packaging/nix/lua.nix { inherit (pkgs) lua5_5; };
           busybox = pkgs.callPackage ./packaging/nix/busybox.nix { };
+          dash = pkgs.callPackage ./packaging/nix/dash.nix { };
           util-linux = (pkgs.util-linux.override { translateManpages = false; }).overrideAttrs (
             finalAttrs: prevAttrs: {
               src = pkgs.fetchFromGitHub {
