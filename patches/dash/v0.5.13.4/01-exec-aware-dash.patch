@@ -1,0 +1,95 @@
+dash: add exec-awareness
+
+From: Skye Soss <skye@soss.website>
+
+Check the Linux executability API before interpreting shell input from any
+source. EXEC_RESTRICT_FILE is checked for filesystem fds, while
+EXEC_DENY_INTERACTIVE is checked for stdin and -c arguments.
+
+Assisted-By: Claude:claude-sonnet-4-6
+---
+ src/input.c |    5 +++++
+ src/main.c  |    8 +++++++-
+ src/shell.h |   33 +++++++++++++++++++++++++++++++++
+ 3 files changed, 45 insertions(+), 1 deletion(-)
+
+diff --git a/src/input.c b/src/input.c
+index 0fb2f18..d738336 100644
+--- a/src/input.c
++++ b/src/input.c
+@@ -564,6 +564,11 @@ setinputfile(const char *fname, int flags)
+ 	fd = sh_open(fname, O_RDONLY, flags & INPUT_NOFILE_OK);
+ 	if (fd < 0)
+ 		goto out;
++	if (check_fd_exec(fd) < 0 && exec_restrict_file()) {
++		close(fd);
++		fd = -1;
++		sh_error("cannot execute '%s': blocked by EXEC_RESTRICT_FILE", fname);
++	}
+ 	if (fd < 10)
+ 		fd = savefd(fd, fd);
+ 	setinputfd(fd, flags & INPUT_PUSH_FILE);
+diff --git a/src/main.c b/src/main.c
+index 5d25b8d..b2d80cd 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -173,11 +173,17 @@ state2:
+ 	popstackmark(&smark);
+ state3:
+ 	state = 4;
+-	if (minusc)
++	if (minusc) {
++		if (exec_deny_interactive())
++			sh_error("-c: blocked by EXEC_DENY_INTERACTIVE");
+ 		evalstring(minusc, sflag ? 0 : EV_EXIT);
++	}
+ 
+ 	if (sflag || minusc == NULL) {
+ state4:	/* XXX ??? - why isn't this before the "if" statement */
++		if (parsefile->fd == 0 &&
++		    check_fd_exec(0) < 0 && exec_deny_interactive())
++			sh_error("stdin: blocked by EXEC_DENY_INTERACTIVE");
+ 		cmdloop(1);
+ 	}
+ exit:
+diff --git a/src/shell.h b/src/shell.h
+index 98edc8b..174404d 100644
+--- a/src/shell.h
++++ b/src/shell.h
+@@ -102,3 +102,36 @@ static inline int max_int_length(int bytes)
+ {
+ 	return (bytes * 8 - 1) * 0.30102999566398119521 + 14;
+ }
++
++/* kernel 6.14+ executability checks */
++#ifdef __linux__
++# include <sys/prctl.h>
++# include <unistd.h>
++/* from <linux/fcntl.h> */
++# ifndef AT_EMPTY_PATH
++#  define AT_EMPTY_PATH 0x1000
++# endif
++# ifndef AT_EXECVE_CHECK
++#  define AT_EXECVE_CHECK 0x10000
++# endif
++# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
++# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++static inline int check_fd_exec(int fd) {
++# pragma GCC diagnostic push
++# pragma GCC diagnostic ignored "-Wnonnull"
++	return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
++# pragma GCC diagnostic pop
++}
++static inline int exec_restrict_file(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_RESTRICT_FILE);
++}
++static inline int exec_deny_interactive(void) {
++	int secbits = prctl(PR_GET_SECUREBITS);
++	return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
++}
++#else
++static inline int check_fd_exec(int fd) { (void)fd; return 0; }
++static inline int exec_restrict_file(void) { return 0; }
++static inline int exec_deny_interactive(void) { return 0; }
++#endif
