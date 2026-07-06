@@ -87,6 +87,9 @@
           busybox-exec-aware = pkgs.callPackage ./packaging/nix/busybox-test.nix {
             busybox = self.packages.${system}.busybox;
           };
+          dash-exec-aware = pkgs.callPackage ./packaging/nix/dash-test.nix {
+            dash = self.packages.${system}.dash;
+          };
         }
       );
 
