@@ -38,27 +38,28 @@ to serve to the web.
 ## How it should work
 
 The core principle, drawn from the [ClipOS][] project, is that exec permission
-is a property of every file's *role*, not just the top-level entry point.
-Any file an interpreter opens to execute as code must be checked — including
+is a property of every file's *role*, not just for native binaries.
+Any file an interpreter opens to execute as code should be checked — including
 entry-point scripts, sourced/included files, and module/library imports.
 
 Programs that are *exec-aware* should perform the following actions:
 
 1. Call `execveat(fd, "", NULL, NULL, AT_EXECVE_CHECK | AT_EMPTY_PATH)` on
-every file descriptor opened to execute its content as code.
-This includes the script passed on the command line, files loaded via `.` or
-`source`, and files loaded via `import`, `require`, or any equivalent.
+   every file descriptor opened to execute its content as code. This includes
+   the script passed on the command line, files loaded via `.` or `source`,
+   and files loaded via `import`, `require`, or any equivalent.
 
 2. If that call fails (the file is not executable):
     - For file descriptors opened from the filesystem by path: query
       `SECBIT_EXEC_RESTRICT_FILE`. If set, abort.
-    - For stdin (fd 0): query `SECBIT_EXEC_DENY_INTERACTIVE`. If set, abort.
-      (Stdin has no filesystem path, so `EXEC_RESTRICT_FILE` does not apply.)
+    - For stdin or other interactive file descriptor: query
+      `SECBIT_EXEC_DENY_INTERACTIVE`. If set, abort.
+      This distinction is just for debugging convenience.
 
-3. Before executing code from a non-file-descriptor source — a command-line
-code argument such as `sh -c '…'`, or an environment variable whose value
-is code rather than a file path — query `SECBIT_EXEC_DENY_INTERACTIVE`.
-If set, the program must not interpret it.
+3. Before executing code from a non-file-descriptor source -- a command-line
+   argument such as `sh -c '...'`, or an environment variable whose value is
+   code rather than a file path -- query `SECBIT_EXEC_DENY_INTERACTIVE`. If
+   set, the program must not interpret it.
 
 ## What this repo contains
 
