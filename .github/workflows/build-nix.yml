@@ -5,6 +5,8 @@ on:
     - cron: '30 7 * * 0'
   push:
     paths:
+      - 'flake.nix'
+      - 'flake.lock'
       - 'packaging/nix/*.nix'
       - '.github/workfllows/build-nix.yml'
 
