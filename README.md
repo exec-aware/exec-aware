@@ -24,7 +24,7 @@ It is a useful security invariant to enforce that your application code
 state (ie. your clients' files that you are storing).
 Your application's files don't change during runtime, and can be executed.
 The untrused state files will definitely change, and you should make sure
-you don't accidentilly execute them.
+you don't accidentally execute them.
 This enforced separation is sometimes known as [W^X][].
 
 On Linux, you can enforce some parts of W^X via [eBPF][].
