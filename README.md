@@ -80,7 +80,8 @@ which files were executed, to avoid issues when the check is enforced.
 
 Q: How do you enable this enforcement mode?
 
-A: Once my patch is upstreamed into `util-linux`, you can use:
+A: Once my `util-linux` [commit][util-linux-commit] is added to a release,
+you will be able to use:
 
 ```sh
 setpriv --securebits +exec_restrict_file,+exec_restrict_file_locked,+exec_deny_interactive,+exec_deny_interactive_locked -- myprog
@@ -90,18 +91,38 @@ The `_locked` variants prevent child processes from turning off the securebit:
 when testing you may want to remove those settings so that you can turn off
 the setting as needed:
 
-```
-setpriv --securebits +exec_restrict_file,+exec_deny_interactive -- /bin/sh
+```sh
+$ # Assume /bin/sh isn't exec-aware for this example
+$ setpriv --securebits +exec_restrict_file,+exec_deny_interactive -- /bin/sh
 sh$ python -c 'print("success")' || echo failed
 failed
 sh$ setpriv --securebits -exec_deny_interactive -- python -c 'print("success")'
 success
 ```
 
+I also submitted a [PR][systemd-pr] to `systemd`, so in version 262 or later you can use
+
+```conf
+[Exec]
+# Note: these settings will be silently ignored on systemd 261 or below
+SecureBits=exec-restrict-file exec-restrict-file-locked
+SecureBits=exec-deny-interactive exec-deny-interactive-locked
+```
+
 Q: Why don't you enforce the check if `prctl(PR_GET_SECUREBITS)` fails?
 
 A: This allows the binary to run without issue on older kernels, or in
 situations where the `prctl` syscall has been disabled in some manner.
+
+This does highlight a weakness in the security model, which is that a bad
+actor may be able to chain together otherwise benign binaries to get code
+execution. Ex.
+
+```sh
+$ setpriv --securebits +exec_deny_interactive -- python -c 'print("success")'
+$ setpriv --securebits +exec_deny_interactive -- enosys --syscall prctl -- python -c 'print("success")'
+success
+```
 
 [Executability Check]: https://docs.kernel.org/userspace-api/check_exec.html
 [ClipOS]: https://clip-project.github.io/
@@ -110,3 +131,5 @@ situations where the `prctl` syscall has been disabled in some manner.
 [systemd]: https://systemd.io
 [systemd-261]: https://mastodon.social/@pid_eins/116792552048067669
 [stgit]: https://stacked-git.github.io/
+[util-linux-commit]: https://github.com/util-linux/util-linux/commit/eeebf6c451c7efe334ad9d0580cf2c60ad750ad6
+[systemd-pr]: https://github.com/systemd/systemd/pull/43376
