@@ -8,7 +8,9 @@ SPDX-License-Identifier: Apache-2.0
 
 Website: busybox.net
 
-## v1.38.0
+## v1.38
+
+Version: 1.38.0
 
 Url: https://busybox.net/downloads/busybox-1.38.0.tar.bz2
 
