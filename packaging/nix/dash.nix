@@ -10,15 +10,15 @@
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "dash";
-  version = "0.5.13.4";
+  version = "0.5.13.5";
 
   src = fetchurl {
     url = "https://git.kernel.org/pub/scm/utils/dash/dash.git/snapshot/dash-${finalAttrs.version}.tar.gz";
-    hash = "sha256-ZS6VAkt1dY3NFBtkoNOXOgJsxqruGuyBzgPnbcPmomc=";
+    hash = "sha256-U2IuUd8P16KVBVLP4NoL7pv8FRB4TnUrYurMSbN3bTM=";
   };
 
   patches = [
-    ../../patches/dash/v0.5.13.4/01-exec-aware-dash.patch
+    ../../patches/dash/v0.5.13/01-exec-aware-dash.patch
   ];
 
   nativeBuildInputs = [ autoreconfHook ];
