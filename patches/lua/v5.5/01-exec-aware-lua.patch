@@ -19,10 +19,10 @@ the REPL, and the load() function.
  5 files changed, 76 insertions(+), 6 deletions(-)
 
 diff --git a/src/lauxlib.c b/src/lauxlib.c
-index 7cf90cb..192bc95 100644
+index 8620c8b..23039a0 100644
 --- a/src/lauxlib.c
 +++ b/src/lauxlib.c
-@@ -814,12 +814,21 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
+@@ -827,12 +827,21 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
    if (filename == NULL) {
      lua_pushliteral(L, "=stdin");
      lf.f = stdin;
@@ -45,7 +45,7 @@ index 7cf90cb..192bc95 100644
    lf.n = 0;
    if (skipcomment(lf.f, &c))  /* read initial portion */
 diff --git a/src/lauxlib.h b/src/lauxlib.h
-index 7f1d3ca..63fc991 100644
+index 2d01536..22a7476 100644
 --- a/src/lauxlib.h
 +++ b/src/lauxlib.h
 @@ -94,7 +94,6 @@ LUALIB_API void (luaL_unref) (lua_State *L, int t, int ref);
@@ -57,10 +57,10 @@ index 7f1d3ca..63fc991 100644
  
  LUALIB_API int (luaL_loadbufferx) (lua_State *L, const char *buff, size_t sz,
 diff --git a/src/lbaselib.c b/src/lbaselib.c
-index 891bb90..048f36d 100644
+index 3962ea5..cdeaa6a 100644
 --- a/src/lbaselib.c
 +++ b/src/lbaselib.c
-@@ -400,6 +400,10 @@ static int luaB_load (lua_State *L) {
+@@ -393,6 +393,10 @@ static int luaB_load (lua_State *L) {
    const char *s = lua_tolstring(L, 1, &l);
    const char *mode = getMode(L, 3);
    int env = (!lua_isnone(L, 4) ? 4 : 0);  /* 'env' index or 0 if no 'env' */
@@ -137,10 +137,10 @@ index 484f2ad..388a83d 100644
 +
 +#endif
 diff --git a/src/lua.c b/src/lua.c
-index 5054583..c7a950f 100644
+index 858a04c..2b5e733 100644
 --- a/src/lua.c
 +++ b/src/lua.c
-@@ -206,6 +206,10 @@ static int dofile (lua_State *L, const char *name) {
+@@ -212,6 +212,10 @@ static int dofile (lua_State *L, const char *name) {
  
  
  static int dostring (lua_State *L, const char *s, const char *name) {
@@ -148,10 +148,10 @@ index 5054583..c7a950f 100644
 +    lua_pushfstring(L, "'%s' blocked by EXEC_DENY_INTERACTIVE", name + 1);
 +    return report(L, LUA_ERRRUN);
 +  }
-   return dochunk(L, luaL_loadbuffer(L, s, strlen(s), name));
+   return dochunk(L, luaL_loadbufferx(L, s, strlen(s), name, "t"));
  }
  
-@@ -674,9 +678,13 @@ static void l_print (lua_State *L) {
+@@ -695,9 +699,13 @@ static void l_print (lua_State *L) {
  ** Do the REPL: repeatedly read (load) a line, evaluate (call) it, and
  ** print any results.
  */
@@ -166,7 +166,7 @@ index 5054583..c7a950f 100644
    progname = NULL;  /* no 'progname' on errors in interactive mode */
    lua_initreadline(L);
    while ((status = loadline(L)) != -1) {
-@@ -688,6 +696,7 @@ static void doREPL (lua_State *L) {
+@@ -709,6 +717,7 @@ static void doREPL (lua_State *L) {
    lua_settop(L, 0);  /* clear stack */
    lua_writeline();
    progname = oldprogname;
@@ -174,7 +174,7 @@ index 5054583..c7a950f 100644
  }
  
  /* }================================================================== */
-@@ -732,14 +741,15 @@ static int pmain (lua_State *L) {
+@@ -760,14 +769,15 @@ static int pmain (lua_State *L) {
      if (handle_script(L, argv + script) != LUA_OK)
        return 0;  /* interrupt in case of error */
    }

@@ -8,7 +8,9 @@ SPDX-License-Identifier: Apache-2.0
 
 Website: https://musl.libc.org/
 
-## v1.2.6
+## v1.2
+
+Version: 1.2.6
 
 Download url: https://musl.libc.org/releases/musl-1.2.6.tar.gz
 

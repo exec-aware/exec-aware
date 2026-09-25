@@ -18,9 +18,9 @@ stdenv.mkDerivation (finalAttrs: {
   };
 
   patches = [
-    ../../patches/busybox/v1.38.0/01-exec-aware-ash.patch
-    ../../patches/busybox/v1.38.0/02-exec-aware-hush.patch
-    ../../patches/busybox/v1.38.0/03-exec-aware-awk.patch
+    ../../patches/busybox/v1.38/01-exec-aware-ash.patch
+    ../../patches/busybox/v1.38/02-exec-aware-hush.patch
+    ../../patches/busybox/v1.38/03-exec-aware-awk.patch
   ];
 
   nativeBuildInputs = [ perl ];

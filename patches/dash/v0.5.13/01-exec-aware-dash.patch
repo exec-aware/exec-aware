@@ -14,10 +14,10 @@ Assisted-By: Claude:claude-sonnet-4-6
  3 files changed, 45 insertions(+), 1 deletion(-)
 
 diff --git a/src/input.c b/src/input.c
-index 0fb2f18..d738336 100644
+index e9b9d33..b2338e9 100644
 --- a/src/input.c
 +++ b/src/input.c
-@@ -564,6 +564,11 @@ setinputfile(const char *fname, int flags)
+@@ -568,6 +568,11 @@ setinputfile(const char *fname, int flags)
  	fd = sh_open(fname, O_RDONLY, flags & INPUT_NOFILE_OK);
  	if (fd < 0)
  		goto out;
@@ -30,10 +30,10 @@ index 0fb2f18..d738336 100644
  		fd = savefd(fd, fd);
  	setinputfd(fd, flags & INPUT_PUSH_FILE);
 diff --git a/src/main.c b/src/main.c
-index 5d25b8d..b2d80cd 100644
+index 2ab506c..4b38416 100644
 --- a/src/main.c
 +++ b/src/main.c
-@@ -173,11 +173,17 @@ state2:
+@@ -170,11 +170,17 @@ state2:
  	popstackmark(&smark);
  state3:
  	state = 4;
