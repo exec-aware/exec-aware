@@ -121,8 +121,12 @@ int main(int argc, char **argv)
                "    p.start()\n"
                "    p.join()\n"
                "    sys.exit(p.exitcode)\n");
+    /* A directory passed as the script runs its __main__.py. */
+    if (mkdir("app", 0755) < 0) { perror("mkdir"); return 2; }
+    write_file("app/__main__.py", "pass\n");
     chmod("main.py", 0755);
     chmod("mp.py", 0755);
+    chmod("app/__main__.py", 0755);
 
     /* === Audit mode (no securebits set) === */
     printf("=== Audit mode ===\n");
@@ -162,6 +166,8 @@ int main(int argc, char **argv)
         printf("FAIL: no bytecode cache was written\n");
         failures++;
     }
+    check(1, run((char *[]){ py, "-m", "mod", NULL }),
+          "executable -m module runs");
 
     /* -c is not a file: EXEC_RESTRICT_FILE does not apply. */
     check(1, run((char *[]){ py, "-c", "pass", NULL }),
@@ -175,6 +181,9 @@ int main(int argc, char **argv)
 
     check(0, run((char *[]){ py, "-c", "pass", NULL }),
           "-c blocked");
+    /* -m is treated like -c: the module can take code from its arguments */
+    check(0, run((char *[]){ py, "-m", "mod", NULL }),
+          "-m blocked");
     /* stdin = /dev/null: not a regular file, so the check fails */
     check(0, run((char *[]){ py, NULL }),
           "stdin blocked");
@@ -189,6 +198,8 @@ int main(int argc, char **argv)
 
     check(1, run((char *[]){ py, "main.py", NULL }),
           "executable script still runs with both bits set");
+    check(1, run((char *[]){ py, "app", NULL }),
+          "directory with an executable __main__.py runs");
 
     /* Only fork works: spawn and forkserver start interpreters with -c. */
     check(1, run((char *[]){ py, "mp.py", "fork", NULL }),

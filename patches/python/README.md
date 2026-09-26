@@ -14,6 +14,14 @@ checks as any other module.
 `make install` installs it with mode 644, so mark the `.py` and `.pyc` files
 executable afterwards, as [python.nix](../../packaging/nix/python.nix) does.
 
+## -m
+
+When `SECBIT_EXEC_DENY_INTERACTIVE` is set, `-m` is blocked like `-c`,
+since a module run with `-m` can take code from its arguments or stdin.
+Run programs from a script file instead.
+A directory or zip file passed as the script still runs its `__main__.py`,
+which is checked like any other file.
+
 ## multiprocessing
 
 When `SECBIT_EXEC_DENY_INTERACTIVE` is set, only the `fork` start method

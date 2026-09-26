@@ -9,15 +9,19 @@ make it read the file with io.open_code().
 
 Check stdin with execveat() before running code from it, either as a
 script or as the REPL (including -i and PYTHONINSPECT). If the check
-fails, consult SECBIT_EXEC_DENY_INTERACTIVE. The -c option consults
-SECBIT_EXEC_DENY_INTERACTIVE directly.
+fails, consult SECBIT_EXEC_DENY_INTERACTIVE.
+
+The -c and -m options consult SECBIT_EXEC_DENY_INTERACTIVE directly: a
+module run with -m can take code from its arguments or stdin. A
+directory or zip file passed as the script still runs its __main__
+module, which is checked like any other file.
 
 Assisted-by: Claude:claude-opus-5.5
 ---
  Lib/_pyrepl/main.py |    5 +++--
- Modules/main.c      |   27 ++++++++++++++++++++++++++-
+ Modules/main.c      |   35 +++++++++++++++++++++++++++++++++--
  Python/pythonrun.c  |    6 +++++-
- 3 files changed, 34 insertions(+), 4 deletions(-)
+ 3 files changed, 41 insertions(+), 5 deletions(-)
 
 diff --git a/Lib/_pyrepl/main.py b/Lib/_pyrepl/main.py
 index 447eb1e..86efaa8 100644
@@ -36,7 +40,7 @@ index 447eb1e..86efaa8 100644
              exec(startup_code, namespace)
  
 diff --git a/Modules/main.c b/Modules/main.c
-index f9df068..6951656 100644
+index f9df068..da1d210 100644
 --- a/Modules/main.c
 +++ b/Modules/main.c
 @@ -2,7 +2,7 @@
@@ -108,6 +112,21 @@ index f9df068..6951656 100644
      pymain_set_inspect(config, 0);
      if (pymain_run_interactive_hook(exitcode)) {
          return;
+@@ -743,7 +768,13 @@ pymain_run_python(int *exitcode)
+         *exitcode = pymain_run_command(config->run_command);
+     }
+     else if (config->run_module) {
+-        *exitcode = pymain_run_module(config->run_module, 1);
++        /* A module run with -m can take code from its arguments or stdin */
++        if (_Py_CheckExecInteractive("-m") < 0) {
++            *exitcode = pymain_exit_err_print();
++        }
++        else {
++            *exitcode = pymain_run_module(config->run_module, 1);
++        }
+     }
+     else if (main_importer_path != NULL) {
+         *exitcode = pymain_run_module(L"__main__", 0);
 diff --git a/Python/pythonrun.c b/Python/pythonrun.c
 index a97bc7d..c7e2785 100644
 --- a/Python/pythonrun.c
