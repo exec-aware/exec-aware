@@ -9,11 +9,11 @@ login-shell startup files (/etc/profile and ~/.profile).
 EXEC_DENY_INTERACTIVE is checked for stdin (both interactive REPL and piped
 input) and -c command strings.
 ---
- shell/hush.c |   45 +++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 45 insertions(+)
+ shell/hush.c |   51 ++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 50 insertions(+), 1 deletion(-)
 
 diff --git a/shell/hush.c b/shell/hush.c
-index dcc6b22..ed42850 100644
+index dcc6b22..8dad96e 100644
 --- a/shell/hush.c
 +++ b/shell/hush.c
 @@ -449,6 +449,33 @@
@@ -50,18 +50,33 @@ index dcc6b22..ed42850 100644
  #if !ENABLE_HUSH_INTERACTIVE
  # undef ENABLE_FEATURE_EDITING
  # define ENABLE_FEATURE_EDITING 0
-@@ -11251,6 +11278,10 @@ int hush_main(int argc, char **argv)
+@@ -11251,6 +11278,13 @@ int hush_main(int argc, char **argv)
  		input = hfopen("/etc/profile");
   run_profile:
  		if (input != NULL) {
-+			if (check_fd_exec(input->fd, "") < 0 && exec_restrict_file()) {
++			/* hp is NULL for /etc/profile, else the ~/.profile path */
++			const char *profile = hp ? hp : "/etc/profile";
++			if (check_fd_exec(input->fd, profile) < 0 && exec_restrict_file()) {
 +				hfclose(input);
-+				bb_error_msg_and_die("can't execute profile: blocked by EXEC_RESTRICT_FILE");
++				bb_error_msg_and_die("can't execute '%s': blocked by EXEC_RESTRICT_FILE",
++						profile);
 +			}
  			parse_and_run_file(input);
  			hfclose(input);
  		}
-@@ -11319,6 +11350,8 @@ int hush_main(int argc, char **argv)
+@@ -11267,9 +11301,10 @@ int hush_main(int argc, char **argv)
+ 				debug_printf("sourcing ~/.profile\n");
+ 				hp = concat_path_file(hp, ".profile");
+ 				input = hfopen(hp);
+-				free((char*)hp);
+ 				goto run_profile;
+ 			}
++		} else {
++			free((char*)hp);
+ 		}
+ 	}
+ 	/* "hush -l" doesn't die in startup scripts, but after -l is processed,
+@@ -11319,6 +11354,8 @@ int hush_main(int argc, char **argv)
  			G.global_argc--;
  			G.global_argv++;
  		}
@@ -70,7 +85,7 @@ index dcc6b22..ed42850 100644
  		parse_and_run_string(script);
  		goto final_return;
  	}
-@@ -11341,6 +11374,11 @@ int hush_main(int argc, char **argv)
+@@ -11341,6 +11378,11 @@ int hush_main(int argc, char **argv)
  			bb_simple_perror_msg_and_die(G.global_argv[0]);
  		}
  		xfunc_error_retval = 1;
@@ -82,7 +97,7 @@ index dcc6b22..ed42850 100644
  		parse_and_run_file(input);
  #if ENABLE_FEATURE_CLEAN_UP
  		hfclose(input);
-@@ -11448,6 +11486,8 @@ int hush_main(int argc, char **argv)
+@@ -11448,6 +11490,8 @@ int hush_main(int argc, char **argv)
  	} /* if on tty */
  #endif /* if INTERACTIVE is allowed by build config */
  
@@ -91,7 +106,7 @@ index dcc6b22..ed42850 100644
  	parse_and_run_file(hfopen(NULL)); /* stdin */
  
   final_return:
-@@ -12320,6 +12360,11 @@ static int FAST_FUNC builtin_source(char **argv)
+@@ -12320,6 +12364,11 @@ static int FAST_FUNC builtin_source(char **argv)
  		 */
  		return EXIT_FAILURE;
  	}
