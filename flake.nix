@@ -103,6 +103,9 @@
           python-exec-aware = pkgs.callPackage ./packaging/nix/python-test.nix {
             python = self.packages.${system}.python;
           };
+          perl-exec-aware = pkgs.callPackage ./packaging/nix/perl-test.nix {
+            perl = self.packages.${system}.perl;
+          };
         }
       );
 
