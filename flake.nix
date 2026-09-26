@@ -99,6 +99,9 @@
           bash-exec-aware = pkgs.callPackage ./packaging/nix/bash-test.nix {
             bash = self.packages.${system}.bash;
           };
+          python-exec-aware = pkgs.callPackage ./packaging/nix/python-test.nix {
+            python = self.packages.${system}.python;
+          };
         }
       );
 
