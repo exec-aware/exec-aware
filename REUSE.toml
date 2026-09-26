@@ -40,3 +40,13 @@ path = [
 ]
 SPDX-License-Identifier = "Apache-2.0 OR PSF-2.0"
 SPDX-FileCopyrightText = "2026 Skye Soss <skye@soss.website>"
+
+[[annotations]]
+path = [
+    "patches/perl/**/*.patch",
+]
+# Combine the copyright notices inside the patch with the info below,
+# instead of letting the notices in the patch replace it
+precedence = "aggregate"
+SPDX-License-Identifier = "Apache-2.0 OR Artistic-1.0-Perl OR GPL-1.0-or-later"
+SPDX-FileCopyrightText = "2026 Skye Soss <skye@soss.website>"

@@ -1,0 +1,270 @@
+perl: add exec-awareness
+
+From: Skye Soss <skye@soss.website>
+
+Check the Linux executability API before running Perl code from any
+source. EXEC_RESTRICT_FILE is checked for the script file and for every
+file loaded by require, use, and do FILE. A file that fails the check is
+treated like one that can't be read: require stops searching @INC and
+dies, and do FILE returns undef with $! set to EACCES.
+
+EXEC_DENY_INTERACTIVE is checked for code that doesn't come from a
+file: a script read from stdin, -e and -E, the default debugger (which
+reads commands from the terminal or runs the code in PERL5DB), and code
+given to -M, -m, -d:Module, or -F on the command line or in PERL5OPT.
+Plain module names, versions, and import lists given as =args are still
+allowed.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ MANIFEST    |    1 +
+ Makefile.SH |    4 +--
+ execaware.h |   79 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ perl.c      |   43 ++++++++++++++++++++++++++++++++
+ pp_ctl.c    |   10 +++++++
+ 5 files changed, 135 insertions(+), 2 deletions(-)
+ create mode 100644 execaware.h
+
+diff --git a/MANIFEST b/MANIFEST
+index 32eb977..fe2dc90 100644
+--- a/MANIFEST
++++ b/MANIFEST
+@@ -32,6 +32,7 @@ ebcdic_tables.h				Generated tables included in utfebcdic.h
+ embed.fnc				Database used by embed.pl
+ embed.h					Maps symbols to safer names
+ embedvar.h				C namespace management
++execaware.h				Linux executability checks
+ EXTERN.h				Included before foreign .h files
+ fakesdio.h				stdio in terms of PerlIO
+ feature.h				Feature header
+diff --git a/Makefile.SH b/Makefile.SH
+index 6f1a114..ced6db5 100755
+--- a/Makefile.SH
++++ b/Makefile.SH
+@@ -534,8 +534,8 @@ unidatadirs = lib/unicore/To lib/unicore/lib
+ 
+ h = \
+     EXTERN.h INTERN.h XSUB.h \
+-    av.h cop.h cv.h dosish.h embed.h form.h gv.h handy.h hv.h hv_func.h \
+-    iperlsys.h keywords.h l1_char_class_tab.h mg.h mydtrace.h op.h \
++    av.h cop.h cv.h dosish.h embed.h execaware.h form.h gv.h handy.h hv.h \
++    hv_func.h iperlsys.h keywords.h l1_char_class_tab.h mg.h mydtrace.h op.h \
+     op_reg_common.h opcode.h pad.h patchlevel.h perl.h perlapi.h perly.h pp.h \
+     proto.h regcomp.h regcomp_internal.h regexp.h regexp_constants.h scope.h \
+     sv.h thread.h unixish.h utf8.h util.h warnings.h \
+diff --git a/execaware.h b/execaware.h
+new file mode 100644
+index 0000000..08a3210
+--- /dev/null
++++ b/execaware.h
+@@ -0,0 +1,79 @@
++/*    execaware.h
++ *
++ *    Copyright (C) 2026 by Skye Soss and others
++ *
++ *    You may distribute under the terms of either the GNU General Public
++ *    License or the Artistic License, as specified in the README file.
++ *
++ */
++
++/* Executability checks for code that perl reads from files, using the
++ * AT_EXECVE_CHECK flag and the SECBIT_EXEC_RESTRICT_FILE and
++ * SECBIT_EXEC_DENY_INTERACTIVE securebits added in Linux 6.14.
++ *
++ * The check is always performed, so that it can be audited, but its result
++ * is only enforced when the corresponding securebit is set.
++ */
++
++#ifndef PERL_EXECAWARE_H_
++#define PERL_EXECAWARE_H_
++
++#if defined(__linux__)
++
++#include <fcntl.h>
++#include <sys/prctl.h>
++#include <sys/syscall.h>
++#include <unistd.h>
++
++/* execveat() and AT_EMPTY_PATH need _GNU_SOURCE on glibc, so use the
++ * syscall directly. */
++#ifndef AT_EMPTY_PATH
++#  define AT_EMPTY_PATH 0x1000
++#endif
++/* from <linux/fcntl.h> */
++#ifndef AT_EXECVE_CHECK
++#  define AT_EXECVE_CHECK 0x10000
++#endif
++/* from <linux/securebits.h> */
++#define PERL_SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
++#define PERL_SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++
++/* Returns 0 if the file open on fd may be executed.  name is passed as
++ * argv[0] so that audit tools can see which file was checked. */
++PERL_STATIC_INLINE int
++check_fd_exec(int fd, const char *name)
++{
++    char *argv[2];
++    argv[0] = (char *)name;
++    argv[1] = NULL;
++    return syscall(SYS_execveat, fd, "", argv, NULL,
++                   AT_EMPTY_PATH | AT_EXECVE_CHECK);
++}
++
++PERL_STATIC_INLINE bool
++exec_restrict_file(void)
++{
++    const int secbits = prctl(PR_GET_SECUREBITS);
++    return secbits >= 0 && (secbits & PERL_SECBIT_EXEC_RESTRICT_FILE);
++}
++
++PERL_STATIC_INLINE bool
++exec_deny_interactive(void)
++{
++    const int secbits = prctl(PR_GET_SECUREBITS);
++    return secbits >= 0 && (secbits & PERL_SECBIT_EXEC_DENY_INTERACTIVE);
++}
++
++#else
++
++#  define check_fd_exec(fd, name) ((void)(fd), (void)(name), 0)
++#  define exec_restrict_file()     FALSE
++#  define exec_deny_interactive()  FALSE
++
++#endif
++
++#endif /* PERL_EXECAWARE_H_ */
++
++/*
++ * ex: set ts=8 sts=4 sw=4 et:
++ */
+diff --git a/perl.c b/perl.c
+index 59dd10f..d4c1b68 100644
+--- a/perl.c
++++ b/perl.c
+@@ -37,6 +37,7 @@
+ #include "EXTERN.h"
+ #define PERL_IN_PERL_C
+ #include "perl.h"
++#include "execaware.h"
+ #include "patchlevel.h"			/* for local_patches */
+ #include "XSUB.h"
+ 
+@@ -2177,6 +2178,15 @@ S_moreswitch_m(pTHX_ char option, const char *s)
+         croak("Invalid module name %.*s with -%c option: "
+                             "contains single ':'",
+                             (int)(s - start), start, option);
++    if (*s != '=' && exec_deny_interactive()) {
++        /* Anything but a version after the module name is Perl code */
++        const char *v = s;
++        while (isDIGIT(*v) || *v == '.' || *v == '_')
++            v++;
++        if (*v)
++            croak("Code in -%c option blocked by EXEC_DENY_INTERACTIVE",
++                  option);
++    }
+     end = s + strlen(s);
+     if (*s != '=') {
+         sv_catpvn(sv, start, end - start);
+@@ -2315,6 +2325,9 @@ S_parse_body(pTHX_ char **env, XSINIT_t xsinit)
+             /* FALLTHROUGH */
+         case 'e':
+             forbid_setid('e', FALSE);
++            if (exec_deny_interactive())
++                croak("Code in -%c option blocked by EXEC_DENY_INTERACTIVE",
++                      c);
+         minus_e = TRUE;
+             if (!PL_e_script) {
+                 PL_e_script = newSVpvs("");
+@@ -2473,6 +2486,16 @@ S_parse_body(pTHX_ char **env, XSINIT_t xsinit)
+     }
+     }
+ 
++    /* -F patterns starting with a quote are inserted into the program as
++     * written; -F on the #! line comes from an already checked file. */
++    if (PL_minus_F
++        && (*PL_splitstr == '/' || *PL_splitstr == '\'' || *PL_splitstr == '"')
++        && strchr(PL_splitstr + 1, *PL_splitstr)
++        && exec_deny_interactive())
++    {
++        croak("Code in -F option blocked by EXEC_DENY_INTERACTIVE");
++    }
++
+ #ifndef NO_PERL_INTERNAL_RAND_SEED
+     /* If we're not set[ug]id, we might have honored
+        PERL_INTERNAL_RAND_SEED in perl_construct().
+@@ -2559,6 +2582,10 @@ S_parse_body(pTHX_ char **env, XSINIT_t xsinit)
+         if (!rsfp) {
+             rsfp = PerlIO_stdin();
+             lex_start_flags = LEX_DONT_CLOSE_RSFP;
++            if (check_fd_exec(0, "/proc/self/fd/0") < 0
++                && exec_deny_interactive())
++                croak("Can't execute perl script from stdin: "
++                      "blocked by EXEC_DENY_INTERACTIVE\n");
+         }
+ 
+         validate_suid(rsfp);
+@@ -3795,6 +3822,10 @@ Perl_moreswitches(pTHX_ const char *s)
+ 
+             /* We now allow -d:Module=Foo,Bar and -d:-Module */
+             while(isWORDCHAR(*s) || *s==':') ++s;
++            /* Anything else is Perl code, and a brace would end q{} */
++            if ((*s == '=' ? strpbrk(s, "{}") != NULL : *s != '\0')
++                && exec_deny_interactive())
++                croak("Code in -d option blocked by EXEC_DENY_INTERACTIVE");
+             if (*s != '=')
+                 sv_catpvn(sv, start, end - start);
+             else {
+@@ -3807,6 +3838,10 @@ Perl_moreswitches(pTHX_ const char *s)
+             my_setenv("PERL5DB", SvPV_nolen_const(sv));
+             SvREFCNT_dec(sv);
+         }
++        /* The default debugger reads commands from the terminal, and
++         * PERL5DB holds code to run in its place */
++        else if (exec_deny_interactive())
++            croak("Debugger blocked by EXEC_DENY_INTERACTIVE");
+         if (!PL_perldb) {
+             PL_perldb = PERLDB_ALL;
+             init_debugger();
+@@ -4313,6 +4348,14 @@ S_open_script(pTHX_ const char *scriptname, bool dosearch, bool *suidscript)
+             CopFILE(PL_curcop),
+             Strerror(EISDIR));
+ 
++    /* -e and -V read their program from the bit bucket */
++    if (strNE(scriptname, BIT_BUCKET)
++        && check_fd_exec(fd, scriptname) < 0
++        && exec_restrict_file())
++        croak("Can't execute perl script \"%s\": "
++              "blocked by EXEC_RESTRICT_FILE\n",
++              CopFILE(PL_curcop));
++
+     return rsfp;
+ }
+ 
+diff --git a/pp_ctl.c b/pp_ctl.c
+index 1bd5f2d..24ff454 100644
+--- a/pp_ctl.c
++++ b/pp_ctl.c
+@@ -33,6 +33,7 @@
+ #include "EXTERN.h"
+ #define PERL_IN_PP_CTL_C
+ #include "perl.h"
++#include "execaware.h"
+ #include "feature.h"
+ 
+ #define dopopto_cursub() \
+@@ -4496,6 +4497,15 @@ S_check_type_and_open(pTHX_ SV *name)
+ #endif
+ 
+     retio = PerlIO_openn(aTHX_ ":", PERL_SCRIPT_MODE, -1, 0, 0, NULL, 1, &name);
++    /* EACCES stops the @INC search, as for a file that can't be read */
++    if (retio
++        && check_fd_exec(PerlIO_fileno(retio), p) < 0
++        && exec_restrict_file())
++    {
++        PerlIO_close(retio);
++        errno = EACCES;
++        return NULL;
++    }
+ #ifdef WIN32
+     /* EACCES stops the INC search early in pp_require to implement
+        feature RT #113422 */
