@@ -14,13 +14,13 @@ Assisted-by: Claude:claude-opus-5.5
 ---
  elf/dl-load.c                           |    8 ++++
  sysdeps/generic/dl-exec-check.h         |   30 ++++++++++++++++
- sysdeps/unix/sysv/linux/dl-exec-check.h |   58 +++++++++++++++++++++++++++++++
- 3 files changed, 96 insertions(+)
+ sysdeps/unix/sysv/linux/dl-exec-check.h |   59 +++++++++++++++++++++++++++++++
+ 3 files changed, 97 insertions(+)
  create mode 100644 sysdeps/generic/dl-exec-check.h
  create mode 100644 sysdeps/unix/sysv/linux/dl-exec-check.h
 
 diff --git a/elf/dl-load.c b/elf/dl-load.c
-index 95404ada..3854d044 100644
+index 95404ada..76d6581c 100644
 --- a/elf/dl-load.c
 +++ b/elf/dl-load.c
 @@ -50,6 +50,7 @@
@@ -36,7 +36,7 @@ index 95404ada..3854d044 100644
  	}
  
 +      /* Loading the object runs its code, so it must be executable.  */
-+      errval = _dl_exec_check (fd);
++      errval = _dl_exec_check (fd, name);
 +      if (__glibc_unlikely (errval != 0))
 +	{
 +	  errstring = N_("blocked by EXEC_RESTRICT_FILE");
@@ -47,7 +47,7 @@ index 95404ada..3854d044 100644
      {
 diff --git a/sysdeps/generic/dl-exec-check.h b/sysdeps/generic/dl-exec-check.h
 new file mode 100644
-index 00000000..76758531
+index 00000000..7ea57703
 --- /dev/null
 +++ b/sysdeps/generic/dl-exec-check.h
 @@ -0,0 +1,30 @@
@@ -72,10 +72,10 @@ index 00000000..76758531
 +#ifndef _DL_EXEC_CHECK_H
 +#define _DL_EXEC_CHECK_H
 +
-+/* Return 0 if the object open on FD may be loaded as code, or an errno
++/* Return 0 if the object NAME open on FD may be loaded as code, or an errno
 +   value if loading it must be refused.  */
 +static inline int
-+_dl_exec_check (int fd)
++_dl_exec_check (int fd, const char *name)
 +{
 +  return 0;
 +}
@@ -83,10 +83,10 @@ index 00000000..76758531
 +#endif /* dl-exec-check.h */
 diff --git a/sysdeps/unix/sysv/linux/dl-exec-check.h b/sysdeps/unix/sysv/linux/dl-exec-check.h
 new file mode 100644
-index 00000000..7d2a934d
+index 00000000..326e88ef
 --- /dev/null
 +++ b/sysdeps/unix/sysv/linux/dl-exec-check.h
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,59 @@
 +/* Check that an object may be loaded as code.  Linux version.
 +   Copyright The GNU Toolchain Authors.
 +   This file is part of the GNU C Library.
@@ -117,7 +117,7 @@ index 00000000..7d2a934d
 +# define SECBIT_EXEC_RESTRICT_FILE (1 << 8)
 +#endif
 +
-+/* Return 0 if the object open on FD may be loaded as code, or an errno
++/* Return 0 if the object NAME open on FD may be loaded as code, or an errno
 +   value if loading it must be refused.
 +
 +   Loading an object runs its code, so ask the kernel whether execve
@@ -126,12 +126,13 @@ index 00000000..7d2a934d
 +   but a failure is only enforced if the process has opted in with the
 +   SECBIT_EXEC_RESTRICT_FILE securebit.  Older kernels reject the
 +   unknown flag and cannot set the securebit, so nothing is enforced
-+   there.  */
++   there.  NAME is passed as argv[0] so that it is visible to auditors
++   of the execveat call.  */
 +static inline int
-+_dl_exec_check (int fd)
++_dl_exec_check (int fd, const char *name)
 +{
 +  int r = INTERNAL_SYSCALL_CALL (execveat, fd, "",
-+				 ((char *const[2]) { (char *) "", NULL }),
++				 ((char *const[2]) { (char *) name, NULL }),
 +				 NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
 +  if (!INTERNAL_SYSCALL_ERROR_P (r))
 +    return 0;

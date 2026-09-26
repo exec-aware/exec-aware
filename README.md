@@ -44,10 +44,12 @@ entry-point scripts, sourced/included files, and module/library imports.
 
 Programs that are *exec-aware* should perform the following actions:
 
-1. Call `execveat(fd, "", NULL, NULL, AT_EXECVE_CHECK | AT_EMPTY_PATH)` on
-   every file descriptor opened to execute its content as code. This includes
-   the script passed on the command line, files loaded via `.` or `source`,
-   and files loaded via `import`, `require`, or any equivalent.
+1. Call `execveat(fd, "", (char *const[2]){ name, NULL }, NULL, AT_EXECVE_CHECK | AT_EMPTY_PATH)`
+   on every file descriptor opened to execute its content as code. This
+   includes the script passed on the command line, files loaded via `.` or
+   `source`, and files loaded via `import`, `require`, or any equivalent.
+   `name` is the file's name as the program opened it, or `/proc/self/fd/0`
+   for stdin, so that audit tools can see which file was checked.
 
 2. If that call fails (the file is not executable):
     - For file descriptors opened from the filesystem by path: query
@@ -81,15 +83,16 @@ non-executable `helper.sh`:
 
 ```console
 $ strace -f -qq -y -e trace=execveat -e signal=none -- dash myscript.sh
-execveat(3</home/user/myscript.sh>, "", NULL, NULL, AT_EMPTY_PATH|AT_EXECVE_CHECK) = 0
-execveat(3</home/user/helper.sh>, "", NULL, NULL, AT_EMPTY_PATH|AT_EXECVE_CHECK) = -1 EACCES (Permission denied)
+execveat(3</home/user/myscript.sh>, "", ["myscript.sh"], NULL, AT_EMPTY_PATH|AT_EXECVE_CHECK) = 0
+execveat(3</home/user/helper.sh>, "", ["./helper.sh"], NULL, AT_EMPTY_PATH|AT_EXECVE_CHECK) = -1 EACCES (Permission denied)
 hi from helper.sh
 ```
 
 Every line containing `AT_EXECVE_CHECK` records one check. The checked file
-appears in angle brackets after the file descriptor, and the return value
-gives the result: `0` means the file may be executed, and `-1 EACCES` means
-it may not. Code read from a pipe on stdin appears as `0<pipe:[...]>`.
+appears in angle brackets after the file descriptor, the name the program
+used for it appears as the only argv entry, and the return value gives the
+result: `0` means the file may be executed, and `-1 EACCES` means it may not.
+Code read from a pipe on stdin appears as `0<pipe:[...]>`.
 Lines without `AT_EXECVE_CHECK` are real `execveat()` calls, not checks.
 Use `-o FILE` to write the trace to a file instead of mixing it with the
 program's stderr.
