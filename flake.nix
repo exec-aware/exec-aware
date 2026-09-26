@@ -51,6 +51,7 @@
           busybox = pkgs.callPackage ./packaging/nix/busybox.nix { };
           dash = pkgs.callPackage ./packaging/nix/dash.nix { };
           bash = pkgs.callPackage ./packaging/nix/bash.nix { };
+          python = pkgs.callPackage ./packaging/nix/python.nix { };
           util-linux = (pkgs.util-linux.override { translateManpages = false; }).overrideAttrs (
             finalAttrs: prevAttrs: {
               src = pkgs.fetchFromGitHub {
@@ -97,6 +98,9 @@
           };
           bash-exec-aware = pkgs.callPackage ./packaging/nix/bash-test.nix {
             bash = self.packages.${system}.bash;
+          };
+          python-exec-aware = pkgs.callPackage ./packaging/nix/python-test.nix {
+            python = self.packages.${system}.python;
           };
         }
       );
