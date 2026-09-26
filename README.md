@@ -61,6 +61,39 @@ Programs that are *exec-aware* should perform the following actions:
    code rather than a file path -- query `SECBIT_EXEC_DENY_INTERACTIVE`. If
    set, the program must not interpret it.
 
+## Seeing which files are checked
+
+You can list every file an exec-aware program checks by running it under
+[strace][]. This needs no special privileges:
+
+```sh
+strace -f -qq -y -e trace=execveat -e signal=none -- myprog
+```
+
+- `-f` follows child processes and threads.
+- `-qq` hides strace's messages about attaching to and exiting processes.
+- `-y` prints the path behind each file descriptor.
+- `-e trace=execveat` shows only `execveat()` calls.
+- `-e signal=none` hides signal deliveries.
+
+For example, running a patched `dash` on a script that sources a
+non-executable `helper.sh`:
+
+```console
+$ strace -f -qq -y -e trace=execveat -e signal=none -- dash myscript.sh
+execveat(3</home/user/myscript.sh>, "", NULL, NULL, AT_EMPTY_PATH|AT_EXECVE_CHECK) = 0
+execveat(3</home/user/helper.sh>, "", NULL, NULL, AT_EMPTY_PATH|AT_EXECVE_CHECK) = -1 EACCES (Permission denied)
+hi from helper.sh
+```
+
+Every line containing `AT_EXECVE_CHECK` records one check. The checked file
+appears in angle brackets after the file descriptor, and the return value
+gives the result: `0` means the file may be executed, and `-1 EACCES` means
+it may not. Code read from a pipe on stdin appears as `0<pipe:[...]>`.
+Lines without `AT_EXECVE_CHECK` are real `execveat()` calls, not checks.
+Use `-o FILE` to write the trace to a file instead of mixing it with the
+program's stderr.
+
 ## What this repo contains
 
 The [`patches`](./patches/README.md) directory contains git patch files
@@ -131,5 +164,6 @@ success
 [systemd]: https://systemd.io
 [systemd-261]: https://mastodon.social/@pid_eins/116792552048067669
 [stgit]: https://stacked-git.github.io/
+[strace]: https://strace.io/
 [util-linux-commit]: https://github.com/util-linux/util-linux/commit/eeebf6c451c7efe334ad9d0580cf2c60ad750ad6
 [systemd-pr]: https://github.com/systemd/systemd/pull/43376
