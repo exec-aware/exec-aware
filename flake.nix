@@ -82,6 +82,9 @@
           musl-exec-aware = pkgs.callPackage ./packaging/nix/musl-test.nix {
             musl = self.packages.${system}.musl;
           };
+          glibc-exec-aware = pkgs.callPackage ./packaging/nix/glibc-test.nix {
+            glibc = self.packages.${system}.glibc;
+          };
           lua-exec-aware = pkgs.callPackage ./packaging/nix/lua-test.nix {
             lua = self.packages.${system}.lua;
           };
