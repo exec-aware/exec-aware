@@ -14,9 +14,9 @@ the REPL, and the load() function.
  src/lauxlib.c  |    9 +++++++++
  src/lauxlib.h  |    1 -
  src/lbaselib.c |    4 ++++
- src/lprefix.h  |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/lprefix.h  |   46 ++++++++++++++++++++++++++++++++++++++++++++++
  src/lua.c      |   20 +++++++++++++++-----
- 5 files changed, 76 insertions(+), 6 deletions(-)
+ 5 files changed, 74 insertions(+), 6 deletions(-)
 
 diff --git a/src/lauxlib.c b/src/lauxlib.c
 index 8620c8b..23039a0 100644
@@ -72,7 +72,7 @@ index 3962ea5..cdeaa6a 100644
      const char *chunkname = luaL_optstring(L, 2, s);
      status = luaL_loadbufferx(L, s, l, chunkname, mode);
 diff --git a/src/lprefix.h b/src/lprefix.h
-index 484f2ad..388a83d 100644
+index 484f2ad..4593b47 100644
 --- a/src/lprefix.h
 +++ b/src/lprefix.h
 @@ -13,6 +13,16 @@
@@ -92,7 +92,7 @@ index 484f2ad..388a83d 100644
  #if !defined(_XOPEN_SOURCE)
  #define _XOPEN_SOURCE           600
  #elif _XOPEN_SOURCE == 0
-@@ -41,5 +51,43 @@
+@@ -41,5 +51,41 @@
  
  #endif			/* } */
  
@@ -113,10 +113,8 @@ index 484f2ad..388a83d 100644
 +#define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
  
 +static inline int check_fd_exec (int fd) {
-+#pragma GCC diagnostic push
-+#pragma GCC diagnostic ignored "-Wnonnull"
-+  return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
-+#pragma GCC diagnostic pop
++  return execveat(fd, "", (char *const[2]){ (char *)"", NULL }, NULL,
++                  AT_EMPTY_PATH | AT_EXECVE_CHECK);
 +}
 +static inline int exec_restrict_file (void) {
 +  int secbits = prctl(PR_GET_SECUREBITS);

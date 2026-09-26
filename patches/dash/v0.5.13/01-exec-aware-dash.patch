@@ -10,8 +10,8 @@ Assisted-By: Claude:claude-sonnet-4-6
 ---
  src/input.c |    5 +++++
  src/main.c  |    8 +++++++-
- src/shell.h |   33 +++++++++++++++++++++++++++++++++
- 3 files changed, 45 insertions(+), 1 deletion(-)
+ src/shell.h |   31 +++++++++++++++++++++++++++++++
+ 3 files changed, 43 insertions(+), 1 deletion(-)
 
 diff --git a/src/input.c b/src/input.c
 index e9b9d33..b2338e9 100644
@@ -53,10 +53,10 @@ index 2ab506c..4b38416 100644
  	}
  exit:
 diff --git a/src/shell.h b/src/shell.h
-index 98edc8b..174404d 100644
+index 98edc8b..086cf82 100644
 --- a/src/shell.h
 +++ b/src/shell.h
-@@ -102,3 +102,36 @@ static inline int max_int_length(int bytes)
+@@ -102,3 +102,34 @@ static inline int max_int_length(int bytes)
  {
  	return (bytes * 8 - 1) * 0.30102999566398119521 + 14;
  }
@@ -75,10 +75,8 @@ index 98edc8b..174404d 100644
 +# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
 +# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
 +static inline int check_fd_exec(int fd) {
-+# pragma GCC diagnostic push
-+# pragma GCC diagnostic ignored "-Wnonnull"
-+	return execveat(fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
-+# pragma GCC diagnostic pop
++	return execveat(fd, "", (char *const[2]){ (char *)"", NULL }, NULL,
++			AT_EMPTY_PATH | AT_EXECVE_CHECK);
 +}
 +static inline int exec_restrict_file(void) {
 +	int secbits = prctl(PR_GET_SECUREBITS);

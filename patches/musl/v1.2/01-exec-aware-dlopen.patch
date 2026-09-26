@@ -9,7 +9,7 @@ executable. If not, and enforcement is enabled, the call to dlopen will fail.
  1 file changed, 17 insertions(+)
 
 diff --git a/ldso/dynlink.c b/ldso/dynlink.c
-index 715948f..9fe2b17 100644
+index 715948f..130fce2 100644
 --- a/ldso/dynlink.c
 +++ b/ldso/dynlink.c
 @@ -19,11 +19,17 @@
@@ -38,7 +38,7 @@ index 715948f..9fe2b17 100644
 +	 * A non-executable file is not an error unless the
 +	 * EXEC_RESTRICT_FILE securebit is set.
 +	 */
-+	if (syscall(SYS_execveat, fd, "", NULL, NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK) < 0) {
++	if (syscall(SYS_execveat, fd, "", ((char *[]){ "", 0 }), NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK) < 0) {
 +		int secbits = prctl(PR_GET_SECUREBITS);
 +		if (secbits >= 0 && (secbits & SECBIT_EXEC_RESTRICT_FILE)) {
 +			close(fd);
