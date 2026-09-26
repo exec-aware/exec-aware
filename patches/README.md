@@ -14,6 +14,10 @@ SPDX-License-Identifier: Apache-2.0
 
 [lua](./lua/README.md)
 
+## glibc
+
+[glibc](./glibc/README.md)
+
 ## musl libc
 
 [musl](./musl/README.md)

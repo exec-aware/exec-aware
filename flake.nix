@@ -46,6 +46,7 @@
         in
         {
           musl = pkgs.callPackage ./packaging/nix/musl.nix { };
+          glibc = pkgs.callPackage ./packaging/nix/glibc.nix { };
           lua = pkgs.callPackage ./packaging/nix/lua.nix { inherit (pkgs) lua5_5; };
           busybox = pkgs.callPackage ./packaging/nix/busybox.nix { };
           dash = pkgs.callPackage ./packaging/nix/dash.nix { };
@@ -80,6 +81,9 @@
         {
           musl-exec-aware = pkgs.callPackage ./packaging/nix/musl-test.nix {
             musl = self.packages.${system}.musl;
+          };
+          glibc-exec-aware = pkgs.callPackage ./packaging/nix/glibc-test.nix {
+            glibc = self.packages.${system}.glibc;
           };
           lua-exec-aware = pkgs.callPackage ./packaging/nix/lua-test.nix {
             lua = self.packages.${system}.lua;

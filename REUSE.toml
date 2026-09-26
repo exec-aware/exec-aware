@@ -16,3 +16,20 @@ path = [
 ]
 SPDX-License-Identifier = "CC0-1.0"
 SPDX-FileCopyrightText = "2026 musl libc <musl@libc.org>"
+
+[[annotations]]
+path = [
+    "patches/glibc/**/*.patch",
+]
+# Combine the copyright notices inside the patch with the info below,
+# instead of letting the notices in the patch replace it
+precedence = "aggregate"
+SPDX-License-Identifier = "Apache-2.0 OR LGPL-2.1-or-later"
+SPDX-FileCopyrightText = "2026 Skye Soss <skye@soss.website>"
+
+[[annotations]]
+path = [
+    "patches/glibc/glibc.pgp",
+]
+SPDX-License-Identifier = "CC0-1.0"
+SPDX-FileCopyrightText = "2026 Andreas K. Huettel <mail@akhuettel.de>"
