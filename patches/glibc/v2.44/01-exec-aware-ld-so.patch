@@ -1,0 +1,147 @@
+elf: add exec-awareness to the dynamic loader
+
+From: Skye Soss <skye@soss.website>
+
+Every ELF object that ld.so maps from the filesystem is opened and
+validated by open_verify, including dlopen'd libraries, DT_NEEDED
+dependencies, LD_PRELOAD and LD_AUDIT modules, and the main program
+when ld.so is invoked directly.  Loading any of these runs their code,
+so check them with execveat(AT_EXECVE_CHECK) once the ELF header has
+been validated.  If the check fails and the SECBIT_EXEC_RESTRICT_FILE
+securebit is set, refuse to load the object.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ elf/dl-load.c                           |    8 ++++
+ sysdeps/generic/dl-exec-check.h         |   30 ++++++++++++++++
+ sysdeps/unix/sysv/linux/dl-exec-check.h |   58 +++++++++++++++++++++++++++++++
+ 3 files changed, 96 insertions(+)
+ create mode 100644 sysdeps/generic/dl-exec-check.h
+ create mode 100644 sysdeps/unix/sysv/linux/dl-exec-check.h
+
+diff --git a/elf/dl-load.c b/elf/dl-load.c
+index 95404ada..3854d044 100644
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -50,6 +50,7 @@
+ #include <dl-map-segment-align.h>
+ #include <dl-unmap-segments.h>
+ #include <dl-machine-reject-phdr.h>
++#include <dl-exec-check.h>
+ #include <dl-prop.h>
+ #include <not-cancel.h>
+ 
+@@ -1744,6 +1745,13 @@ open_verify (const char *name, int fd,
+ 	  goto lose;
+ 	}
+ 
++      /* Loading the object runs its code, so it must be executable.  */
++      errval = _dl_exec_check (fd);
++      if (__glibc_unlikely (errval != 0))
++	{
++	  errstring = N_("blocked by EXEC_RESTRICT_FILE");
++	  goto lose;
++	}
+     }
+   else
+     {
+diff --git a/sysdeps/generic/dl-exec-check.h b/sysdeps/generic/dl-exec-check.h
+new file mode 100644
+index 00000000..76758531
+--- /dev/null
++++ b/sysdeps/generic/dl-exec-check.h
+@@ -0,0 +1,30 @@
++/* Check that an object may be loaded as code.  Generic version.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _DL_EXEC_CHECK_H
++#define _DL_EXEC_CHECK_H
++
++/* Return 0 if the object open on FD may be loaded as code, or an errno
++   value if loading it must be refused.  */
++static inline int
++_dl_exec_check (int fd)
++{
++  return 0;
++}
++
++#endif /* dl-exec-check.h */
+diff --git a/sysdeps/unix/sysv/linux/dl-exec-check.h b/sysdeps/unix/sysv/linux/dl-exec-check.h
+new file mode 100644
+index 00000000..7d2a934d
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/dl-exec-check.h
+@@ -0,0 +1,58 @@
++/* Check that an object may be loaded as code.  Linux version.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _DL_EXEC_CHECK_H
++#define _DL_EXEC_CHECK_H
++
++#include <fcntl.h>
++#include <sys/prctl.h>
++#include <sysdep.h>
++
++/* From <linux/securebits.h>, Linux 6.14.  */
++#ifndef SECBIT_EXEC_RESTRICT_FILE
++# define SECBIT_EXEC_RESTRICT_FILE (1 << 8)
++#endif
++
++/* Return 0 if the object open on FD may be loaded as code, or an errno
++   value if loading it must be refused.
++
++   Loading an object runs its code, so ask the kernel whether execve
++   would be allowed on it (AT_EXECVE_CHECK, Linux 6.14).  The check is
++   always made so that administrators can audit which files are loaded,
++   but a failure is only enforced if the process has opted in with the
++   SECBIT_EXEC_RESTRICT_FILE securebit.  Older kernels reject the
++   unknown flag and cannot set the securebit, so nothing is enforced
++   there.  */
++static inline int
++_dl_exec_check (int fd)
++{
++  int r = INTERNAL_SYSCALL_CALL (execveat, fd, "",
++				 ((char *const[2]) { (char *) "", NULL }),
++				 NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK);
++  if (!INTERNAL_SYSCALL_ERROR_P (r))
++    return 0;
++
++  int secbits = INTERNAL_SYSCALL_CALL (prctl, PR_GET_SECUREBITS);
++  if (INTERNAL_SYSCALL_ERROR_P (secbits)
++      || (secbits & SECBIT_EXEC_RESTRICT_FILE) == 0)
++    return 0;
++
++  return INTERNAL_SYSCALL_ERRNO (r);
++}
++
++#endif /* dl-exec-check.h */
