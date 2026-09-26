@@ -95,6 +95,9 @@
           dash-exec-aware = pkgs.callPackage ./packaging/nix/dash-test.nix {
             dash = self.packages.${system}.dash;
           };
+          bash-exec-aware = pkgs.callPackage ./packaging/nix/bash-test.nix {
+            bash = self.packages.${system}.bash;
+          };
         }
       );
 
