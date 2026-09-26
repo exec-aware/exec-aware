@@ -28,7 +28,7 @@ static const char *python;
 static int failures;
 
 /* Fork and exec argv[]; redirect stdin from 'input' (or /dev/null if NULL);
- * suppress stdout+stderr. */
+ * suppress stdout+stderr. Kill the child if it runs for over a minute. */
 static int run_with_stdin(const char *input, char *const argv[])
 {
     pid_t pid = fork();
@@ -41,6 +41,7 @@ static int run_with_stdin(const char *input, char *const argv[])
         dup2(null_w, STDERR_FILENO);
         close(in);
         close(null_w);
+        alarm(60);
         execv(argv[0], argv);
         _exit(127);
     }
@@ -109,7 +110,19 @@ int main(int argc, char **argv)
     write_file("main.py", "import mod\n");
     write_file("mod.py", "pass\n");
     write_file("plain.py", "pass\n");
+    /* Start a child with the start method named by argv[1]. */
+    write_file("mp.py",
+               "import multiprocessing, sys\n"
+               "def child():\n"
+               "    pass\n"
+               "if __name__ == '__main__':\n"
+               "    ctx = multiprocessing.get_context(sys.argv[1])\n"
+               "    p = ctx.Process(target=child)\n"
+               "    p.start()\n"
+               "    p.join()\n"
+               "    sys.exit(p.exitcode)\n");
     chmod("main.py", 0755);
+    chmod("mp.py", 0755);
 
     /* === Audit mode (no securebits set) === */
     printf("=== Audit mode ===\n");
@@ -176,6 +189,14 @@ int main(int argc, char **argv)
 
     check(1, run((char *[]){ py, "main.py", NULL }),
           "executable script still runs with both bits set");
+
+    /* Only fork works: spawn and forkserver start interpreters with -c. */
+    check(1, run((char *[]){ py, "mp.py", "fork", NULL }),
+          "multiprocessing fork child runs");
+    check(0, run((char *[]){ py, "mp.py", "spawn", NULL }),
+          "multiprocessing spawn child blocked");
+    check(0, run((char *[]){ py, "mp.py", "forkserver", NULL }),
+          "multiprocessing forkserver child blocked");
 
     if (chdir("/") < 0 || nftw(dir, remove_entry, 8, FTW_DEPTH | FTW_PHYS) < 0)
         perror(dir);
