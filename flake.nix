@@ -46,6 +46,7 @@
         in
         {
           musl = pkgs.callPackage ./packaging/nix/musl.nix { };
+          glibc = pkgs.callPackage ./packaging/nix/glibc.nix { };
           lua = pkgs.callPackage ./packaging/nix/lua.nix { inherit (pkgs) lua5_5; };
           busybox = pkgs.callPackage ./packaging/nix/busybox.nix { };
           dash = pkgs.callPackage ./packaging/nix/dash.nix { };
