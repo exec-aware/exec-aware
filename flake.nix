@@ -52,6 +52,7 @@
           dash = pkgs.callPackage ./packaging/nix/dash.nix { };
           bash = pkgs.callPackage ./packaging/nix/bash.nix { };
           python = pkgs.callPackage ./packaging/nix/python.nix { };
+          perl = pkgs.callPackage ./packaging/nix/perl.nix { };
           util-linux = (pkgs.util-linux.override { translateManpages = false; }).overrideAttrs (
             finalAttrs: prevAttrs: {
               src = pkgs.fetchFromGitHub {
