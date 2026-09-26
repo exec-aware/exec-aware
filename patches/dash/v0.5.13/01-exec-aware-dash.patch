@@ -14,14 +14,14 @@ Assisted-By: Claude:claude-sonnet-4-6
  3 files changed, 43 insertions(+), 1 deletion(-)
 
 diff --git a/src/input.c b/src/input.c
-index e9b9d33..b2338e9 100644
+index e9b9d33..28e5e72 100644
 --- a/src/input.c
 +++ b/src/input.c
 @@ -568,6 +568,11 @@ setinputfile(const char *fname, int flags)
  	fd = sh_open(fname, O_RDONLY, flags & INPUT_NOFILE_OK);
  	if (fd < 0)
  		goto out;
-+	if (check_fd_exec(fd) < 0 && exec_restrict_file()) {
++	if (check_fd_exec(fd, fname) < 0 && exec_restrict_file()) {
 +		close(fd);
 +		fd = -1;
 +		sh_error("cannot execute '%s': blocked by EXEC_RESTRICT_FILE", fname);
@@ -30,7 +30,7 @@ index e9b9d33..b2338e9 100644
  		fd = savefd(fd, fd);
  	setinputfd(fd, flags & INPUT_PUSH_FILE);
 diff --git a/src/main.c b/src/main.c
-index 2ab506c..4b38416 100644
+index 2ab506c..be9965a 100644
 --- a/src/main.c
 +++ b/src/main.c
 @@ -170,11 +170,17 @@ state2:
@@ -47,13 +47,13 @@ index 2ab506c..4b38416 100644
  	if (sflag || minusc == NULL) {
  state4:	/* XXX ??? - why isn't this before the "if" statement */
 +		if (parsefile->fd == 0 &&
-+		    check_fd_exec(0) < 0 && exec_deny_interactive())
++		    check_fd_exec(0, "/proc/self/fd/0") < 0 && exec_deny_interactive())
 +			sh_error("stdin: blocked by EXEC_DENY_INTERACTIVE");
  		cmdloop(1);
  	}
  exit:
 diff --git a/src/shell.h b/src/shell.h
-index 98edc8b..086cf82 100644
+index 98edc8b..e3d3f26 100644
 --- a/src/shell.h
 +++ b/src/shell.h
 @@ -102,3 +102,34 @@ static inline int max_int_length(int bytes)
@@ -74,8 +74,8 @@ index 98edc8b..086cf82 100644
 +# endif
 +# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
 +# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
-+static inline int check_fd_exec(int fd) {
-+	return execveat(fd, "", (char *const[2]){ (char *)"", NULL }, NULL,
++static inline int check_fd_exec(int fd, const char *name) {
++	return execveat(fd, "", (char *const[2]){ (char *)name, NULL }, NULL,
 +			AT_EMPTY_PATH | AT_EXECVE_CHECK);
 +}
 +static inline int exec_restrict_file(void) {
@@ -87,7 +87,7 @@ index 98edc8b..086cf82 100644
 +	return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
 +}
 +#else
-+static inline int check_fd_exec(int fd) { (void)fd; return 0; }
++static inline int check_fd_exec(int fd, const char *name) { (void)fd; (void)name; return 0; }
 +static inline int exec_restrict_file(void) { return 0; }
 +static inline int exec_deny_interactive(void) { return 0; }
 +#endif

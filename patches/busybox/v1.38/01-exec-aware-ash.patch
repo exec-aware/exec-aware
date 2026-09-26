@@ -13,7 +13,7 @@ input) and -c command strings.
  1 file changed, 48 insertions(+), 3 deletions(-)
 
 diff --git a/shell/ash.c b/shell/ash.c
-index fb887f3..42e6b13 100644
+index fb887f3..af9c145 100644
 --- a/shell/ash.c
 +++ b/shell/ash.c
 @@ -312,6 +312,33 @@ typedef long arith_t;
@@ -29,8 +29,8 @@ index fb887f3..42e6b13 100644
 +# endif
 +# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
 +# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
-+static inline int check_fd_exec(int fd) {
-+	return execveat(fd, "", (char *const[2]){ (char *)"", NULL }, NULL,
++static inline int check_fd_exec(int fd, const char *name) {
++	return execveat(fd, "", (char *const[2]){ (char *)name, NULL }, NULL,
 +			AT_EMPTY_PATH | AT_EXECVE_CHECK);
 +}
 +static inline int exec_restrict_file(void) {
@@ -42,7 +42,7 @@ index fb887f3..42e6b13 100644
 +	return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
 +}
 +#else
-+static inline int check_fd_exec(int fd) { (void)fd; return 0; }
++static inline int check_fd_exec(int fd, const char *name) { (void)fd; (void)name; return 0; }
 +static inline int exec_restrict_file(void) { return 0; }
 +static inline int exec_deny_interactive(void) { return 0; }
 +#endif
@@ -57,7 +57,7 @@ index fb887f3..42e6b13 100644
 -	setinputfile(fullname, INPUT_PUSH_FILE);
 +	{
 +		int dot_fd = setinputfile(fullname, INPUT_PUSH_FILE);
-+		if (check_fd_exec(dot_fd) < 0 && exec_restrict_file()) {
++		if (check_fd_exec(dot_fd, fullname) < 0 && exec_restrict_file()) {
 +			popfile();
 +			ash_msg_and_raise_error("can't execute '%s': blocked by EXEC_RESTRICT_FILE", fullname);
 +		}
@@ -71,7 +71,7 @@ index fb887f3..42e6b13 100644
  	} else if (!sflag) {
 -		setinputfile(*xargv, 0);
 +		int script_fd = setinputfile(*xargv, 0);
-+		if (check_fd_exec(script_fd) < 0 && exec_restrict_file())
++		if (check_fd_exec(script_fd, *xargv) < 0 && exec_restrict_file())
 +			ash_msg_and_raise_error("can't execute '%s': blocked by EXEC_RESTRICT_FILE", *xargv);
   setarg0:
  		arg0 = *xargv++;
@@ -86,7 +86,7 @@ index fb887f3..42e6b13 100644
 +	fd = setinputfile(name, INPUT_PUSH_FILE | INPUT_NOFILE_OK);
 +	if (fd < 0)
  		return;
-+	if (check_fd_exec(fd) < 0 && exec_restrict_file()) {
++	if (check_fd_exec(fd, name) < 0 && exec_restrict_file()) {
 +		popfile();
 +		ash_msg_and_raise_error("can't execute '%s': blocked by EXEC_RESTRICT_FILE", name);
 +	}
@@ -106,7 +106,7 @@ index fb887f3..42e6b13 100644
  # endif
  		}
  #endif
-+		if (sflag && check_fd_exec(STDIN_FILENO) < 0 && exec_deny_interactive())
++		if (sflag && check_fd_exec(STDIN_FILENO, "/proc/self/fd/0") < 0 && exec_deny_interactive())
 +			ash_msg_and_raise_error("stdin blocked by EXEC_DENY_INTERACTIVE");
   state4: /* XXX ??? - why isn't this before the "if" statement */
  		dbg_show_dirtymem("dirtymem at cmdloop");

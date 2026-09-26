@@ -11,7 +11,7 @@ PROGRAM, and inline programs supplied as a positional argument.
  1 file changed, 36 insertions(+)
 
 diff --git a/editors/awk.c b/editors/awk.c
-index dd8f4ac..cde8937 100644
+index dd8f4ac..69f2694 100644
 --- a/editors/awk.c
 +++ b/editors/awk.c
 @@ -49,6 +49,33 @@
@@ -27,8 +27,8 @@ index dd8f4ac..cde8937 100644
 +# endif
 +# define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
 +# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
-+static inline int check_fd_exec(int fd) {
-+	return execveat(fd, "", (char *const[2]){ (char *)"", NULL }, NULL,
++static inline int check_fd_exec(int fd, const char *name) {
++	return execveat(fd, "", (char *const[2]){ (char *)name, NULL }, NULL,
 +			AT_EMPTY_PATH | AT_EXECVE_CHECK);
 +}
 +static inline int exec_restrict_file(void) {
@@ -40,7 +40,7 @@ index dd8f4ac..cde8937 100644
 +	return secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE);
 +}
 +#else
-+static inline int check_fd_exec(int fd) { (void)fd; return 0; }
++static inline int check_fd_exec(int fd, const char *name) { (void)fd; (void)name; return 0; }
 +static inline int exec_restrict_file(void) { return 0; }
 +static inline int exec_deny_interactive(void) { return 0; }
 +#endif
@@ -52,7 +52,7 @@ index dd8f4ac..cde8937 100644
  			char *s;
  			g_progname = optarg;
  			fd = xopen_stdin(g_progname);
-+			if (check_fd_exec(fd) < 0) {
++			if (check_fd_exec(fd, fd == STDIN_FILENO ? "/proc/self/fd/0" : g_progname) < 0) {
 +				if (fd == STDIN_FILENO ? exec_deny_interactive() : exec_restrict_file())
 +					bb_error_msg_and_die("can't execute '%s': blocked by exec securebits",
 +							g_progname);
