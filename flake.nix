@@ -50,6 +50,7 @@
           lua = pkgs.callPackage ./packaging/nix/lua.nix { inherit (pkgs) lua5_5; };
           busybox = pkgs.callPackage ./packaging/nix/busybox.nix { };
           dash = pkgs.callPackage ./packaging/nix/dash.nix { };
+          bash = pkgs.callPackage ./packaging/nix/bash.nix { };
           util-linux = (pkgs.util-linux.override { translateManpages = false; }).overrideAttrs (
             finalAttrs: prevAttrs: {
               src = pkgs.fetchFromGitHub {
