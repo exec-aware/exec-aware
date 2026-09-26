@@ -33,3 +33,7 @@ SPDX-License-Identifier: Apache-2.0
 ## python
 
 [python](./python/README.md)
+
+## perl
+
+[perl](./perl/README.md)
