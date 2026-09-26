@@ -1,0 +1,134 @@
+implement executable awareness for the python program
+
+From: Skye Soss <skye@soss.website>
+
+Check the script file passed on the command line, the PYTHONSTARTUP file
+and a .pyc file reopened by PyRun_SimpleFile() against
+SECBIT_EXEC_RESTRICT_FILE. The new REPL reads PYTHONSTARTUP itself, so
+make it read the file with io.open_code().
+
+Check stdin with execveat() before running code from it, either as a
+script or as the REPL (including -i and PYTHONINSPECT). If the check
+fails, consult SECBIT_EXEC_DENY_INTERACTIVE. The -c option consults
+SECBIT_EXEC_DENY_INTERACTIVE directly.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ Lib/_pyrepl/main.py |    5 +++--
+ Modules/main.c      |   27 ++++++++++++++++++++++++++-
+ Python/pythonrun.c  |    6 +++++-
+ 3 files changed, 34 insertions(+), 4 deletions(-)
+
+diff --git a/Lib/_pyrepl/main.py b/Lib/_pyrepl/main.py
+index 447eb1e..86efaa8 100644
+--- a/Lib/_pyrepl/main.py
++++ b/Lib/_pyrepl/main.py
+@@ -40,8 +40,9 @@ def interactive_console(mainmodule=None, quiet=False, pythonstartup=False):
+     if pythonstartup and startup_path:
+         sys.audit("cpython.run_startup", startup_path)
+ 
+-        import tokenize
+-        with tokenize.open(startup_path) as f:
++        # open_code() checks that the file is executable
++        import io
++        with io.open_code(startup_path) as f:
+             startup_code = compile(f.read(), startup_path, "exec")
+             exec(startup_code, namespace)
+ 
+diff --git a/Modules/main.c b/Modules/main.c
+index f9df068..6951656 100644
+--- a/Modules/main.c
++++ b/Modules/main.c
+@@ -2,7 +2,7 @@
+ 
+ #include "Python.h"
+ #include "pycore_call.h"          // _PyObject_CallNoArgs()
+-#include "pycore_fileutils.h"     // struct _Py_stat_struct
++#include "pycore_fileutils.h"     // struct _Py_stat_struct, _Py_CheckExecFd()
+ #include "pycore_import.h"        // _PyImport_Fini2()
+ #include "pycore_initconfig.h"    // _PyArgv
+ #include "pycore_interp.h"        // _PyInterpreterState.sysdict
+@@ -255,6 +255,11 @@ pymain_run_command(wchar_t *command)
+         return pymain_exit_err_print();
+     }
+ 
++    if (_Py_CheckExecInteractive("-c") < 0) {
++        Py_DECREF(unicode);
++        return pymain_exit_err_print();
++    }
++
+     Py_SETREF(unicode, _PyUnicode_Dedent(unicode));
+     if (unicode == NULL) {
+         goto error;
+@@ -426,6 +431,11 @@ pymain_run_file_obj(PyObject *program_name, PyObject *filename,
+         return 1;
+     }
+ 
++    if (_Py_CheckExecFd(fileno(fp), filename) < 0) {
++        fclose(fp);
++        return pymain_exit_err_print();
++    }
++
+     if (pymain_check_signals() < 0) {
+         fclose(fp);
+         return pymain_exit_err_print();
+@@ -504,6 +514,12 @@ pymain_run_startup(PyConfig *config, int *exitcode)
+         goto error;
+     }
+ 
++    if (_Py_CheckExecFd(fileno(fp), startup) < 0) {
++        fclose(fp);
++        PySys_WriteStderr("Could not execute PYTHONSTARTUP\n");
++        goto error;
++    }
++
+     PyCompilerFlags cf = _PyCompilerFlags_INIT;
+     PyObject *result = _PyRun_SimpleFile(fp, startup, 0, &cf);
+     fclose(fp);
+@@ -616,6 +632,10 @@ _pymain_run_repl(PyConfig *config, int startup)
+ static int
+ pymain_run_stdin(PyConfig *config)
+ {
++    if (_Py_CheckExecFd(fileno(stdin), NULL) < 0) {
++        return pymain_exit_err_print();
++    }
++
+     if (stdin_is_interactive(config)) {
+         // do exit on SystemExit
+         pymain_set_inspect(config, 0);
+@@ -647,6 +667,11 @@ pymain_repl(PyConfig *config, int *exitcode)
+         return;
+     }
+ 
++    if (_Py_CheckExecFd(fileno(stdin), NULL) < 0) {
++        *exitcode = pymain_exit_err_print();
++        return;
++    }
++
+     pymain_set_inspect(config, 0);
+     if (pymain_run_interactive_hook(exitcode)) {
+         return;
+diff --git a/Python/pythonrun.c b/Python/pythonrun.c
+index a97bc7d..c7e2785 100644
+--- a/Python/pythonrun.c
++++ b/Python/pythonrun.c
+@@ -14,7 +14,7 @@
+ #include "pycore_audit.h"         // _PySys_Audit()
+ #include "pycore_ceval.h"         // _Py_EnterRecursiveCall()
+ #include "pycore_compile.h"       // _PyAST_Compile()
+-#include "pycore_fileutils.h"     // _PyFile_Flush
++#include "pycore_fileutils.h"     // _PyFile_Flush, _Py_CheckExecFd()
+ #include "pycore_import.h"        // _PyImport_GetImportlibExternalLoader()
+ #include "pycore_interp.h"        // PyInterpreterState.importlib
+ #include "pycore_object.h"        // _PyDebug_PrintTotalRefs()
+@@ -522,6 +522,10 @@ _PyRun_SimpleFile(FILE *fp, PyObject *filename, int closeit,
+             fprintf(stderr, "python: Can't reopen .pyc file\n");
+             goto done;
+         }
++        if (_Py_CheckExecFd(fileno(pyc_fp), filename) < 0) {
++            fclose(pyc_fp);
++            goto done;
++        }
+ 
+         if (set_main_loader(dict, filename, "SourcelessFileLoader") < 0) {
+             fprintf(stderr, "python: failed to set __main__.__loader__\n");

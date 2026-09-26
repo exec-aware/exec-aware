@@ -33,3 +33,10 @@ path = [
 ]
 SPDX-License-Identifier = "CC0-1.0"
 SPDX-FileCopyrightText = "2026 Andreas K. Huettel <mail@akhuettel.de>"
+
+[[annotations]]
+path = [
+    "patches/python/**/*.patch",
+]
+SPDX-License-Identifier = "Apache-2.0 OR PSF-2.0"
+SPDX-FileCopyrightText = "2026 Skye Soss <skye@soss.website>"

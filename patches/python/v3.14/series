@@ -1,0 +1,3 @@
+# This series applies on Git commit 823f0323ee6ec1402088b73bce1a38473cac36dc
+01-exec-aware-open-code.patch
+02-exec-aware-main.patch

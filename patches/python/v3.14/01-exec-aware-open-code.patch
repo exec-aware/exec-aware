@@ -1,0 +1,230 @@
+implement executable awareness for io.open_code
+
+From: Skye Soss <skye@soss.website>
+
+Add _Py_CheckExecFd() and _Py_CheckExecInteractive(), which call
+execveat() with AT_EXECVE_CHECK and consult the securebits.
+
+PEP 578 made io.open_code() the way to open a file whose contents will be
+executed. Its default implementation now checks the opened file, and
+raises PermissionError if the check fails and SECBIT_EXEC_RESTRICT_FILE is
+set. This covers imported source and bytecode files, zipimport archives,
+-m, runpy.run_path(), .pth files, and the scripts run by pdb, profile,
+cProfile and trace. An open_code hook installed by an embedder with
+PyFile_SetOpenCodeHook() replaces the default implementation, and with it
+the check.
+
+Bytecode caches now keep the execute bits of their source file, so a
+module whose source is executable can still be imported from its cache.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ Include/internal/pycore_fileutils.h  |   18 +++++++
+ Lib/importlib/_bootstrap_external.py |    4 +
+ Objects/fileobject.c                 |   25 +++++++++
+ Python/fileutils.c                   |   93 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 139 insertions(+), 1 deletion(-)
+
+diff --git a/Include/internal/pycore_fileutils.h b/Include/internal/pycore_fileutils.h
+index 2c6d6da..a8bad7f 100644
+--- a/Include/internal/pycore_fileutils.h
++++ b/Include/internal/pycore_fileutils.h
+@@ -314,6 +314,24 @@ extern int _Py_GetTicksPerSecond(long *ticks_per_second);
+ // Export for '_testcapi' shared extension
+ PyAPI_FUNC(int) _Py_IsValidFD(int fd);
+ 
++/* Executability checks (Linux 6.14+ AT_EXECVE_CHECK).
++
++   _Py_CheckExecFd() asks the kernel whether the code read from fd could be
++   executed. filename is the file's name as it was opened, and is passed to
++   the kernel as argv[0] so audit tools can see which file was checked. If the
++   check fails, SECBIT_EXEC_RESTRICT_FILE decides whether the code is blocked.
++   If filename is NULL, fd is standard input or another stream without a name,
++   and SECBIT_EXEC_DENY_INTERACTIVE decides instead.
++
++   _Py_CheckExecInteractive() checks SECBIT_EXEC_DENY_INTERACTIVE before
++   running code that does not come from a file descriptor, such as -c.
++   what names that source in the error message.
++
++   Both return 0 if the code may run, or raise an exception and return -1 if
++   it is blocked. */
++extern int _Py_CheckExecFd(int fd, PyObject *filename);
++extern int _Py_CheckExecInteractive(const char *what);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/Lib/importlib/_bootstrap_external.py b/Lib/importlib/_bootstrap_external.py
+index 6a828ae..6fca46b 100644
+--- a/Lib/importlib/_bootstrap_external.py
++++ b/Lib/importlib/_bootstrap_external.py
+@@ -203,8 +203,10 @@ def _write_atomic(path, data, mode=0o666):
+     temporary file is attempted."""
+     # id() is used to generate a pseudo-random filename.
+     path_tmp = f'{path}.{id(path)}'
++    # Keep the execute bits: bytecode is read with open_code(), which
++    # requires it to be executable when SECBIT_EXEC_RESTRICT_FILE is set.
+     fd = _os.open(path_tmp,
+-                  _os.O_EXCL | _os.O_CREAT | _os.O_WRONLY, mode & 0o666)
++                  _os.O_EXCL | _os.O_CREAT | _os.O_WRONLY, mode & 0o777)
+     try:
+         # We first write data to a temporary file, and then use os.replace() to
+         # perform an atomic rename.
+diff --git a/Objects/fileobject.c b/Objects/fileobject.c
+index e624405..9c2ac27 100644
+--- a/Objects/fileobject.c
++++ b/Objects/fileobject.c
+@@ -2,6 +2,7 @@
+ 
+ #include "Python.h"
+ #include "pycore_call.h"          // _PyObject_CallNoArgs()
++#include "pycore_fileutils.h"     // _Py_CheckExecFd()
+ #include "pycore_runtime.h"       // _PyRuntime
+ #include "pycore_unicodeobject.h" // _PyUnicode_AsUTF8String()
+ 
+@@ -497,6 +498,27 @@ PyFile_SetOpenCodeHook(Py_OpenCodeHookFunction hook, void *userData) {
+     return 0;
+ }
+ 
++/* Close f and raise an exception if the kernel does not allow executing the
++   code in it. An open_code hook installed by an embedder replaces this check. */
++static int
++open_code_check_exec(PyObject *f, PyObject *path)
++{
++    int fd = PyObject_AsFileDescriptor(f);
++    if (fd >= 0 && _Py_CheckExecFd(fd, path) == 0) {
++        return 0;
++    }
++    PyObject *exc = PyErr_GetRaisedException();
++    PyObject *res = PyObject_CallMethod(f, "close", NULL);
++    if (res == NULL) {
++        _PyErr_ChainExceptions1(exc);
++    }
++    else {
++        Py_DECREF(res);
++        PyErr_SetRaisedException(exc);
++    }
++    return -1;
++}
++
+ PyObject *
+ PyFile_OpenCodeObject(PyObject *path)
+ {
+@@ -517,6 +539,9 @@ PyFile_OpenCodeObject(PyObject *path)
+             f = PyObject_CallFunction(open, "Os", path, "rb");
+             Py_DECREF(open);
+         }
++        if (f != NULL && open_code_check_exec(f, path) < 0) {
++            Py_CLEAR(f);
++        }
+     }
+ 
+     return f;
+diff --git a/Python/fileutils.c b/Python/fileutils.c
+index 78603d4..d241194 100644
+--- a/Python/fileutils.c
++++ b/Python/fileutils.c
+@@ -38,6 +38,11 @@ extern int winerror_to_errno(int);
+ #  include <fcntl.h>              // fcntl(F_GETFD)
+ #endif
+ 
++#ifdef __linux__
++#  include <sys/prctl.h>          // PR_GET_SECUREBITS
++#  include <sys/syscall.h>        // SYS_execveat
++#endif
++
+ #ifdef O_CLOEXEC
+ /* Does open() support the O_CLOEXEC flag? Possible values:
+ 
+@@ -3110,3 +3115,91 @@ _Py_IsValidFD(int fd)
+     return (fstat(fd, &st) == 0);
+ #endif
+ }
++
++
++#if defined(__linux__) && defined(SYS_execveat)
++/* from <linux/fcntl.h>; not yet in libc headers */
++#ifndef AT_EXECVE_CHECK
++#  define AT_EXECVE_CHECK 0x10000
++#endif
++/* from <linux/securebits.h> */
++#define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
++#define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++
++static int
++exec_securebit_is_set(int bit)
++{
++    int secbits = prctl(PR_GET_SECUREBITS);
++    return secbits >= 0 && (secbits & bit);
++}
++
++int
++_Py_CheckExecFd(int fd, PyObject *filename)
++{
++    PyObject *name;
++    if (filename != NULL) {
++        name = PyUnicode_EncodeFSDefault(filename);
++    }
++    else {
++        name = PyBytes_FromFormat("/proc/self/fd/%d", fd);
++    }
++    if (name == NULL) {
++        return -1;
++    }
++
++    /* not every libc provides an execveat() wrapper */
++    char *const argv[2] = { PyBytes_AS_STRING(name), NULL };
++    int res;
++    Py_BEGIN_ALLOW_THREADS
++    res = (int)syscall(SYS_execveat, fd, "", argv, NULL,
++                       AT_EMPTY_PATH | AT_EXECVE_CHECK);
++    Py_END_ALLOW_THREADS
++    int saved_errno = errno;
++    Py_DECREF(name);
++    if (res == 0) {
++        return 0;
++    }
++
++    if (filename == NULL) {
++        if (!exec_securebit_is_set(SECBIT_EXEC_DENY_INTERACTIVE)) {
++            return 0;
++        }
++        PyErr_Format(PyExc_PermissionError,
++                     "reading code from file descriptor %d "
++                     "blocked by EXEC_DENY_INTERACTIVE", fd);
++        return -1;
++    }
++    if (!exec_securebit_is_set(SECBIT_EXEC_RESTRICT_FILE)) {
++        return 0;
++    }
++    errno = saved_errno;
++    PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, filename);
++    return -1;
++}
++
++int
++_Py_CheckExecInteractive(const char *what)
++{
++    if (!exec_securebit_is_set(SECBIT_EXEC_DENY_INTERACTIVE)) {
++        return 0;
++    }
++    PyErr_Format(PyExc_PermissionError,
++                 "%s blocked by EXEC_DENY_INTERACTIVE", what);
++    return -1;
++}
++
++#else
++
++int
++_Py_CheckExecFd(int Py_UNUSED(fd), PyObject *Py_UNUSED(filename))
++{
++    return 0;
++}
++
++int
++_Py_CheckExecInteractive(const char *Py_UNUSED(what))
++{
++    return 0;
++}
++
++#endif
