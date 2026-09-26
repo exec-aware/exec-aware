@@ -6,6 +6,10 @@ SPDX-License-Identifier: Apache-2.0
 
 # Patches
 
+## bash
+
+[bash](./bash/README.md)
+
 ## busybox
 
 [busybox](./busybox/README.md)

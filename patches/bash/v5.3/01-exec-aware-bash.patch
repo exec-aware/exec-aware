@@ -1,0 +1,234 @@
+bash: add exec-awareness
+
+From: Skye Soss <skye@soss.website>
+
+Check the Linux executability API before interpreting shell input from any
+source. EXEC_RESTRICT_FILE is checked for filesystem fds: the script file
+argument, files sourced via the . and source builtins, and startup files
+(/etc/profile, ~/.bash_profile, ~/.bashrc, --rcfile, $BASH_ENV, $ENV).
+EXEC_DENY_INTERACTIVE is checked for stdin, -c command strings, and
+commands re-executed by fc.
+
+EXEC_DENY_INTERACTIVE also stops bash from running code taken from the
+environment: exported functions are not imported (as in privileged mode),
+PS4 is reset to its default (as it is for root), and $BASH_ENV and $ENV
+are used as literal paths instead of being expanded, since expansion can
+run command substitutions.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ builtins/evalfile.c |   16 +++++++++++++
+ general.c           |   61 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ general.h           |    4 +++
+ shell.c             |   34 ++++++++++++++++++++++++++++
+ variables.c         |   11 ++++++---
+ 5 files changed, 121 insertions(+), 5 deletions(-)
+
+diff --git a/builtins/evalfile.c b/builtins/evalfile.c
+index 3026c5f..cd4d31b 100644
+--- a/builtins/evalfile.c
++++ b/builtins/evalfile.c
+@@ -145,6 +145,22 @@ file_error_and_exit:
+       return ((flags & FEVAL_BUILTIN) ? EXECUTION_FAILURE : -1);
+     }
+ 
++  /* fc executes a temporary file holding commands the user typed or edited,
++     so treat it as interactive input rather than as a file. */
++  if (check_fd_exec (fd, filename) < 0 &&
++      ((flags & FEVAL_HISTORY) ? exec_deny_interactive () : exec_restrict_file ()))
++    {
++      (*errfunc) (_("%s: cannot execute: blocked by %s"), filename,
++		  (flags & FEVAL_HISTORY) ? "EXEC_DENY_INTERACTIVE" : "EXEC_RESTRICT_FILE");
++      close (fd);
++      if (flags & FEVAL_LONGJMP)
++	{
++	  last_command_exit_value = EXECUTION_FAILURE;
++	  jump_to_top_level (EXITPROG);
++	}
++      return ((flags & FEVAL_BUILTIN) ? EXECUTION_FAILURE : -1);
++    }
++
+   file_size = (size_t)finfo.st_size;
+   /* Check for overflow with large files. */
+   if (file_size != finfo.st_size || file_size + 1 < file_size)
+diff --git a/general.c b/general.c
+index c8442ef..56dd1d0 100644
+--- a/general.c
++++ b/general.c
+@@ -1477,3 +1477,64 @@ default_columns (void)
+ 
+   return (c > 0 ? c : 80);
+ }
++
++/* Linux 6.14+ executability checks */
++#if defined (__linux__)
++#  include <sys/prctl.h>
++/* from <linux/fcntl.h> */
++#  if !defined (AT_EMPTY_PATH)
++#    define AT_EMPTY_PATH 0x1000
++#  endif
++#  if !defined (AT_EXECVE_CHECK)
++#    define AT_EXECVE_CHECK 0x10000
++#  endif
++#  define SECBIT_EXEC_RESTRICT_FILE	(1 << 8)
++#  define SECBIT_EXEC_DENY_INTERACTIVE	(1 << 10)
++
++/* Return 0 if the kernel would allow the file open on FD to be executed,
++   -1 otherwise.  NAME is the name FD was opened with, passed as argv[0] so
++   audit tools can see which file was checked.  Always called, even when
++   not enforcing, so the check can be audited. */
++int
++check_fd_exec (int fd, const char *name)
++{
++  return (execveat (fd, "", (char *const[2]){ (char *)name, NULL }, NULL,
++		    AT_EMPTY_PATH | AT_EXECVE_CHECK));
++}
++
++int
++exec_restrict_file (void)
++{
++  int secbits;
++
++  secbits = prctl (PR_GET_SECUREBITS);
++  return (secbits >= 0 && (secbits & SECBIT_EXEC_RESTRICT_FILE));
++}
++
++int
++exec_deny_interactive (void)
++{
++  int secbits;
++
++  secbits = prctl (PR_GET_SECUREBITS);
++  return (secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE));
++}
++#else
++int
++check_fd_exec (int fd, const char *name)
++{
++  return 0;
++}
++
++int
++exec_restrict_file (void)
++{
++  return 0;
++}
++
++int
++exec_deny_interactive (void)
++{
++  return 0;
++}
++#endif
+diff --git a/general.h b/general.h
+index 8471a34..382a2a5 100644
+--- a/general.h
++++ b/general.h
+@@ -364,4 +364,8 @@ extern int *get_group_array (int *);
+ extern char *conf_standard_path (void);
+ extern int default_columns (void);
+ 
++extern int check_fd_exec (int, const char *);
++extern int exec_restrict_file (void);
++extern int exec_deny_interactive (void);
++
+ #endif	/* _GENERAL_H_ */
+diff --git a/shell.c b/shell.c
+index e59029c..c8dc089 100644
+--- a/shell.c
++++ b/shell.c
+@@ -703,6 +703,24 @@ main (int argc, char **argv, char **env)
+   else
+     arg_index = bind_args (argv, arg_index, argc, 1);	/* $1 ... $n */
+ 
++  /* Refuse to run code that does not come from an executable file before
++     running any startup files.  A script file is checked when it's opened. */
++  if (wordexp_only == 0 && shell_script_filename == 0)
++    {
++      if (command_execution_string && exec_deny_interactive ())
++	{
++	  internal_error (_("-c: blocked by EXEC_DENY_INTERACTIVE"));
++	  exit (EX_NOEXEC);
++	}
++      else if (command_execution_string == 0 &&
++	       check_fd_exec (fileno (stdin), "/proc/self/fd/0") < 0 &&
++	       exec_deny_interactive ())
++	{
++	  internal_error (_("stdin: blocked by EXEC_DENY_INTERACTIVE"));
++	  exit (EX_NOEXEC);
++	}
++    }
++
+   /* The startup files are run with `set -e' temporarily disabled. */
+   ssh_reading_startup_files = 0;		/* paranoia */
+   if (locally_skip_execution == 0 && running_setuid == 0)
+@@ -1106,7 +1124,12 @@ execute_env_file (char *env_file)
+ 
+   if (env_file && *env_file)
+     {
+-      fn = expand_string_unsplit_to_string (env_file, Q_DOUBLE_QUOTES);
++      /* Expanding the value can run command substitutions, which would
++	 execute code taken from the environment. */
++      if (exec_deny_interactive ())
++	fn = savestring (env_file);
++      else
++	fn = expand_string_unsplit_to_string (env_file, Q_DOUBLE_QUOTES);
+       if (fn && *fn)
+ 	maybe_execute_file (fn, 1);
+       FREE (fn);
+@@ -1632,6 +1655,15 @@ open_shell_script (char *script_name)
+       sh_exit (EX_NOINPUT);
+     }
+ 
++  if (check_fd_exec (fd, filename) < 0 && exec_restrict_file ())
++    {
++      internal_error (_("%s: cannot execute: blocked by EXEC_RESTRICT_FILE"), filename);
++#if defined (JOB_CONTROL)
++      end_job_control ();	/* just in case we were run as bash -i script */
++#endif
++      sh_exit (EX_NOEXEC);
++    }
++
+ #if defined (ARRAY_VARS)
+   GET_ARRAY_FROM_VAR ("FUNCNAME", funcname_v, funcname_a);
+   GET_ARRAY_FROM_VAR ("BASH_SOURCE", bash_source_v, bash_source_a);
+diff --git a/variables.c b/variables.c
+index 4e6f93b..392fd08 100644
+--- a/variables.c
++++ b/variables.c
+@@ -368,11 +368,14 @@ void
+ initialize_shell_variables (char **env, int privmode)
+ {
+   char *name, *string, *temp_string;
+-  int c, char_index, string_index, string_length, ro;
++  int c, char_index, string_index, string_length, ro, deny_interactive;
+   SHELL_VAR *temp_var;
+ 
+   create_variable_tables ();
+ 
++  /* Exported functions and PS4 are code taken from the environment. */
++  deny_interactive = exec_deny_interactive ();
++
+   for (string_index = 0; env && (string = env[string_index++]); )
+     {
+       char_index = 0;
+@@ -396,8 +399,8 @@ initialize_shell_variables (char **env, int privmode)
+ 
+ #if defined (FUNCTION_IMPORT)
+       /* If exported function, define it now.  Don't import functions from
+-	 the environment in privileged mode. */
+-      if (privmode == 0 && read_but_dont_execute == 0 && 
++	 the environment in privileged mode or under EXEC_DENY_INTERACTIVE. */
++      if (privmode == 0 && read_but_dont_execute == 0 && deny_interactive == 0 &&
+           STREQN (BASHFUNC_PREFIX, name, BASHFUNC_PREFLEN) &&
+           STREQ (BASHFUNC_SUFFIX, name + char_index - BASHFUNC_SUFFLEN) &&
+ 	  STREQN ("() {", string, 4))
+@@ -578,7 +581,7 @@ initialize_shell_variables (char **env, int privmode)
+       set_if_not ("PS2", secondary_prompt);
+     }
+ 
+-  if (current_user.euid == 0)
++  if (current_user.euid == 0 || deny_interactive)
+     bind_variable ("PS4", "+ ", 0);
+   else
+     set_if_not ("PS4", "+ ");
