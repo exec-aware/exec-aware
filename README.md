@@ -12,8 +12,8 @@ Patches that let you enforce executability checks.
 
 Linux added the [Executability Check][] API in 6.14, which allows userspace
 programs to check that a program is executable before running it.
-This is combined with an unprivileged securebit setting that allows programs
-to opt into enforcement.
+This is combined with unprivileged securebits that allow programs to opt into
+enforcement.
 
 ## Background
 
@@ -38,15 +38,15 @@ to serve to the web.
 ## How it should work
 
 The core principle, drawn from the [ClipOS][] project, is that exec permission
-is a property of every file's *role*, not just for native binaries.
-Any file an interpreter opens to execute as code should be checked — including
+is a controlled property for every file, not just for native binaries.
+Any file an interpreter opens to execute as code should be checked:
 entry-point scripts, sourced/included files, and module/library imports.
 
 Programs that are *exec-aware* should perform the following actions:
 
 1. Call `execveat(fd, "", (char *const[2]){ name, NULL }, NULL, AT_EXECVE_CHECK | AT_EMPTY_PATH)`
-   on every file descriptor opened to execute its content as code. This
-   includes the script passed on the command line, files loaded via `.` or
+   on every file descriptor opened to execute its content as code.
+   This includes the script passed on the command line, files loaded via `.` or
    `source`, and files loaded via `import`, `require`, or any equivalent.
    `name` is the file's name as the program opened it, or `/proc/self/fd/0`
    for stdin, so that audit tools can see which file was checked.
@@ -66,7 +66,7 @@ Programs that are *exec-aware* should perform the following actions:
 ## Seeing which files are checked
 
 You can list every file an exec-aware program checks by running it under
-[strace][]. This needs no special privileges:
+[strace][]:
 
 ```sh
 strace -f -qq -y -e trace=execveat -e signal=none -- myprog
@@ -88,12 +88,12 @@ execveat(3</home/user/helper.sh>, "", ["./helper.sh"], NULL, AT_EMPTY_PATH|AT_EX
 hi from helper.sh
 ```
 
-Every line containing `AT_EXECVE_CHECK` records one check. The checked file
-appears in angle brackets after the file descriptor, the name the program
-used for it appears as the only argv entry, and the return value gives the
-result: `0` means the file may be executed, and `-1 EACCES` means it may not.
+Every line with `execveat(..., AT_EXECVE_CHECK)` records one check.
+The checked file appears in angle brackets after the file descriptor, the name
+the program used for it appears as the only argv entry, and the return value
+gives the result: `0` means the file may be executed, and `-1 EACCES` means it
+may not.
 Code read from a pipe on stdin appears as `0<pipe:[...]>`.
-Lines without `AT_EXECVE_CHECK` are real `execveat()` calls, not checks.
 Use `-o FILE` to write the trace to a file instead of mixing it with the
 program's stderr.
 
@@ -103,6 +103,12 @@ The [`patches`](./patches/README.md) directory contains git patch files
 that implement execution awareness for the project at a specific version.
 These are maintained via [stgit][].
 
+Note that this repo only maintains patches for the most recent supported
+version of the project.
+For example when Lua 5.5.1 was released, its patch replaced the existing patch
+for Lua 5.5.0.
+You may be able to find those previous patches in the git history.
+
 The `packaging` directory is used to build these projects for downstream
 consumption.
 
@@ -111,8 +117,8 @@ consumption.
 Q: Why do you always call `execveat()`, even if the securebit isn't set?
 
 A: This enables a form of "auditing mode" for the program.
-With this call, an administrator can use eBPF or similar to determine
-which files were executed, to avoid issues when the check is enforced.
+With this call, an administrator can use strace to determine which files were
+executed, to avoid issues when the check is enforced.
 
 Q: How do you enable this enforcement mode?
 
