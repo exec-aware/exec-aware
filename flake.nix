@@ -53,26 +53,7 @@
           bash = pkgs.callPackage ./packaging/nix/bash.nix { };
           python = pkgs.callPackage ./packaging/nix/python.nix { };
           perl = pkgs.callPackage ./packaging/nix/perl.nix { };
-          util-linux = (pkgs.util-linux.override { translateManpages = false; }).overrideAttrs (
-            finalAttrs: prevAttrs: {
-              src = pkgs.fetchFromGitHub {
-                owner = "Skyb0rg007";
-                repo = "util-linux";
-                rev = "87397f60013a9bfb4054ae1d673b8f9a0cef6062";
-                hash = "sha256-0jc6M0uV9Zq3IrN1Cf/99ksWX/FJrZvNbK0DAkujcVA=";
-              };
-              patches = [ ];
-              preConfigure = "./autogen.sh";
-              nativeBuildInputs = prevAttrs.nativeBuildInputs ++ [
-                pkgs.libtool
-                pkgs.automake
-                pkgs.flex
-                pkgs.bison
-                pkgs.gettext
-                pkgs.asciidoctor
-              ];
-            }
-          );
+          util-linux = pkgs.callPackage ./packaging/nix/util-linux.nix { };
         }
       );
 
@@ -105,6 +86,9 @@
           };
           perl-exec-aware = pkgs.callPackage ./packaging/nix/perl-test.nix {
             perl = self.packages.${system}.perl;
+          };
+          util-linux-exec-aware = pkgs.callPackage ./packaging/nix/util-linux-test.nix {
+            util-linux = self.packages.${system}.util-linux;
           };
         }
       );

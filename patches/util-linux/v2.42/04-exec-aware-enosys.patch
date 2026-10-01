@@ -1,0 +1,68 @@
+enosys: refuse to load the filter under EXEC_DENY_INTERACTIVE
+
+From: Skye Soss <skye@soss.website>
+
+A seccomp filter decides what every system call made by the command
+returns, including the prctl(PR_GET_SECUREBITS) and execveat() calls
+that exec-aware programs rely on. enosys builds its filter from the
+command line, so `enosys -s prctl -- python -c ...` turns off Python's
+EXEC_DENY_INTERACTIVE check. Faking any other syscall, for example
+`-s execveat:0`, can do the same.
+
+Treat the filter as code given on the command line and refuse to load
+it when EXEC_DENY_INTERACTIVE is set. --dump still works, since it
+doesn't run anything: the dumped filter can be given execute permission
+and loaded with `setpriv --seccomp-filter`, which checks it under
+EXEC_RESTRICT_FILE.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ misc-utils/enosys.1.adoc |    4 ++++
+ misc-utils/enosys.c      |   12 ++++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/misc-utils/enosys.1.adoc b/misc-utils/enosys.1.adoc
+index 9ffd9129b..4c559b927 100644
+--- a/misc-utils/enosys.1.adoc
++++ b/misc-utils/enosys.1.adoc
+@@ -76,6 +76,10 @@ internal error
+ *2*::
+ system does not provide the necessary functionality
+ 
++== NOTES
++
++A seccomp filter can change the result of any system call, including the ones programs use to check the *exec_restrict_file* and *exec_deny_interactive* securebits (see *setpriv*(1)). Since the filter built by *enosys* comes from its command line rather than from a file, *enosys* refuses to run _command_ when the *exec_deny_interactive* securebit is set. *--dump* still works: an administrator can save the filter to a file, give it execute permission, and load it with *setpriv --seccomp-filter*.
++
+ == AUTHORS
+ 
+ mailto:thomas@t-8ch.de[Thomas Weißschuh]
+diff --git a/misc-utils/enosys.c b/misc-utils/enosys.c
+index f1438b8e8..b668bea5c 100644
+--- a/misc-utils/enosys.c
++++ b/misc-utils/enosys.c
+@@ -36,6 +36,10 @@
+ #include "seccomp.h"
+ #include "all-io.h"
+ 
++#ifndef SECBIT_EXEC_DENY_INTERACTIVE
++# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++#endif
++
+ #define IS_LITTLE_ENDIAN (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+ 
+ #define syscall_nr (offsetof(struct seccomp_data, nr))
+@@ -287,6 +291,14 @@ int main(int argc, char **argv)
+ 		return EXIT_SUCCESS;
+ 	}
+ 
++	/* The filter decides what every syscall returns, including the
++	 * prctl() and execveat() calls used by exec-aware programs.
++	 * Building it from the command line is running code that doesn't
++	 * come from a file. */
++	int secbits = prctl(PR_GET_SECUREBITS, 0, 0, 0, 0);
++	if (secbits >= 0 && (secbits & SECBIT_EXEC_DENY_INTERACTIVE))
++		errx(EXIT_FAILURE, _("cannot load seccomp filter: blocked by EXEC_DENY_INTERACTIVE"));
++
+ 	struct sock_fprog prog = {
+ 		.len    = f - filter,
+ 		.filter = filter,

@@ -1,0 +1,76 @@
+setpriv: check that --seccomp-filter files are executable
+
+From: Skye Soss <skye@soss.website>
+
+A seccomp filter decides what every system call made by the program
+returns, including the prctl(PR_GET_SECUREBITS) and execveat() calls
+that exec-aware programs rely on. A filter that makes either of them
+fail or return 0 turns off their checks, so loading one is running code.
+
+Check the filter file with AT_EXECVE_CHECK and refuse to load it when
+the check fails and EXEC_RESTRICT_FILE is set. An administrator can
+still allow a filter by giving it execute permission.
+
+The check uses the securebits setpriv was started with, since the
+filter is loaded before --securebits is applied.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ sys-utils/setpriv.1.adoc |    2 ++
+ sys-utils/setpriv.c      |   16 ++++++++++++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/sys-utils/setpriv.1.adoc b/sys-utils/setpriv.1.adoc
+index e67a23454..30160da0c 100644
+--- a/sys-utils/setpriv.1.adoc
++++ b/sys-utils/setpriv.1.adoc
+@@ -135,6 +135,8 @@ For example grant file read access to everything under */boot*:
+ Load raw BPF seccomp filter code from a file.
+ +
+ Filters can for example be created with *enosys*.
+++
++A filter can change the result of any system call made by _program_, so it is treated as code: if the *exec_restrict_file* securebit is set, the file must pass the executability check described in *execveat*(2) under *AT_EXECVE_CHECK*, which usually means it must have execute permission. The check uses the securebits *setpriv* was started with, not the ones set with *--securebits*.
+ 
+ *--reset-env*::
+ * clears all the environment variables except *TERM* environment variable
+diff --git a/sys-utils/setpriv.c b/sys-utils/setpriv.c
+index 9ec3ed96a..99d98a5dc 100644
+--- a/sys-utils/setpriv.c
++++ b/sys-utils/setpriv.c
+@@ -28,6 +28,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <sys/prctl.h>
++#include <sys/syscall.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+ #include <paths.h>
+@@ -72,6 +73,9 @@
+ #ifndef SECBIT_EXEC_DENY_INTERACTIVE_LOCKED
+ # define SECBIT_EXEC_DENY_INTERACTIVE_LOCKED (1 << 11)
+ #endif
++#ifndef AT_EXECVE_CHECK
++# define AT_EXECVE_CHECK 0x10000
++#endif
+ 
+ #define SETPRIV_EXIT_PRIVERR 127	/* how we exit when we fail to set privs */
+ 
+@@ -742,6 +746,18 @@ static void do_seccomp_filter(const char *file)
+ 		err(SETPRIV_EXIT_PRIVERR,
+ 		    _("cannot open %s"), file);
+ 
++	/* The filter decides what every syscall returns, including the
++	 * prctl() and execveat() calls used by exec-aware programs, so it
++	 * is code and must be executable like any other. */
++	if (syscall(SYS_execveat, fd, "", (char *const[]){ (char *) file, NULL },
++		    NULL, AT_EMPTY_PATH | AT_EXECVE_CHECK) != 0) {
++		int bits = prctl(PR_GET_SECUREBITS, 0, 0, 0, 0);
++
++		if (bits >= 0 && (bits & SECBIT_EXEC_RESTRICT_FILE))
++			errx(SETPRIV_EXIT_PRIVERR,
++			     _("cannot load %s: blocked by EXEC_RESTRICT_FILE"), file);
++	}
++
+ 	s = read_all_alloc(fd, &filter);
+ 	if (s < 0)
+ 		err(SETPRIV_EXIT_PRIVERR,

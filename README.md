@@ -122,8 +122,9 @@ executed, to avoid issues when the check is enforced.
 
 Q: How do you enable this enforcement mode?
 
-A: Once my `util-linux` [commit][util-linux-commit] is added to a release,
-you will be able to use:
+A: Once my `util-linux` [commit][util-linux-commit] is added to a release
+(or with the [util-linux patches](./patches/util-linux/README.md) in this
+repo), you will be able to use:
 
 ```sh
 setpriv --securebits +exec_restrict_file,+exec_restrict_file_locked,+exec_deny_interactive,+exec_deny_interactive_locked -- myprog
@@ -165,6 +166,12 @@ $ setpriv --securebits +exec_deny_interactive -- python -c 'print("success")'
 $ setpriv --securebits +exec_deny_interactive -- enosys --syscall prctl -- python -c 'print("success")'
 success
 ```
+
+The [util-linux patches](./patches/util-linux/README.md) in this repo close
+this particular gap: `enosys` refuses to load its filter when
+`SECBIT_EXEC_DENY_INTERACTIVE` is set, and `setpriv --seccomp-filter` only
+loads filter files that pass the executability check when
+`SECBIT_EXEC_RESTRICT_FILE` is set.
 
 [Executability Check]: https://docs.kernel.org/userspace-api/check_exec.html
 [ClipOS]: https://clip-project.github.io/
