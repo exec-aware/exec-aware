@@ -87,6 +87,9 @@
           perl-exec-aware = pkgs.callPackage ./packaging/nix/perl-test.nix {
             perl = self.packages.${system}.perl;
           };
+          util-linux-exec-aware = pkgs.callPackage ./packaging/nix/util-linux-test.nix {
+            util-linux = self.packages.${system}.util-linux;
+          };
         }
       );
 
