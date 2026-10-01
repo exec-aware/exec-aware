@@ -1,0 +1,5 @@
+# This series applies on Git commit d76cbf8f13e65ff657344f7f6a90042cf755ba59
+01-setpriv-add-new-securebits.patch
+02-setpriv-improve-securebits-man-page.patch
+03-exec-aware-setpriv.patch
+04-exec-aware-enosys.patch

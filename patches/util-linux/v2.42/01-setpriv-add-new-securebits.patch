@@ -1,0 +1,116 @@
+setpriv: add new securebits
+
+From: Skye Soss <skye@soss.website>
+
+Modifies setpriv to support the securebits `no_cap_ambient_raise`,
+`exec_restrict_file`, `exec_deny_interactive`, and each of their
+`_locked` variants.
+
+The NO_CAP_AMBIENT_RAISE securebit was added in Linux 4.3, and the
+EXEC_RESTRICT_FILE and EXEC_DENY_INTERACTIVE securebits were added in
+Linux 6.14.
+
+Signed-off-by: Skye Soss <skye@soss.website>
+---
+ bash-completion/setpriv  |    6 ++++++
+ sys-utils/setpriv.1.adoc |    2 +-
+ sys-utils/setpriv.c      |   42 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 49 insertions(+), 1 deletion(-)
+
+diff --git a/bash-completion/setpriv b/bash-completion/setpriv
+index a472943fa..e508be394 100644
+--- a/bash-completion/setpriv
++++ b/bash-completion/setpriv
+@@ -55,6 +55,12 @@ _setpriv_module()
+ 				{+,-}noroot_locked
+ 				{+,-}no_setuid_fixup
+ 				{+,-}no_setuid_fixup_locked
++				{+,-}no_cap_ambient_raise
++				{+,-}no_cap_ambient_raise_locked
++				{+,-}exec_restrict_file
++				{+,-}exec_restrict_file_locked
++				{+,-}exec_deny_interactive
++				{+,-}exec_deny_interactive_locked
+ 			"
+ 			for WORD in $SBITS_ALL; do
+ 				if ! [[ $prefix == *"$WORD"* ]]; then
+diff --git a/sys-utils/setpriv.1.adoc b/sys-utils/setpriv.1.adoc
+index 8dbb142c4..b96e83fb9 100644
+--- a/sys-utils/setpriv.1.adoc
++++ b/sys-utils/setpriv.1.adoc
+@@ -74,7 +74,7 @@ Setting a _uid_ or _gid_ does not change capabilities, although the exec call at
+ *setpriv --reuid=1000 --regid=1000 --inh-caps=-all*
+ 
+ *--securebits* (**+**|*-*)__securebit__...::
+-Set or clear securebits. The argument is a comma-separated list. The valid securebits are _noroot_, _noroot_locked_, _no_setuid_fixup_, _no_setuid_fixup_locked_, and _keep_caps_locked_. _keep_caps_ is cleared by *execve*(2) and is therefore not allowed.
++Set or clear securebits. The argument is a comma-separated list. The valid securebits are _noroot_, _noroot_locked_, _no_setuid_fixup_, _no_setuid_fixup_locked_, _keep_caps_locked_, _no_cap_ambient_raise_, _no_cap_ambient_raise_locked_, _exec_restrict_file_, _exec_restrict_file_locked_, _exec_deny_interactive_, and _exec_deny_interactive_locked_. _keep_caps_ is cleared by *execve*(2) and is therefore not allowed.
+ 
+ **--pdeathsig keep**|**clear**|*<signal>*::
+ Keep, clear or set the parent death signal. Some LSMs, most notably SELinux and AppArmor, clear the signal when the process' credentials change. Using *--pdeathsig keep* will restore the parent death signal after changing credentials to remedy that situation.
+diff --git a/sys-utils/setpriv.c b/sys-utils/setpriv.c
+index a6444a6f6..9ec3ed96a 100644
+--- a/sys-utils/setpriv.c
++++ b/sys-utils/setpriv.c
+@@ -54,6 +54,24 @@
+ #ifndef PR_GET_NO_NEW_PRIVS
+ # define PR_GET_NO_NEW_PRIVS 39
+ #endif
++#ifndef SECBIT_NO_CAP_AMBIENT_RAISE
++# define SECBIT_NO_CAP_AMBIENT_RAISE (1 << 6)
++#endif
++#ifndef SECBIT_NO_CAP_AMBIENT_RAISE_LOCKED
++# define SECBIT_NO_CAP_AMBIENT_RAISE_LOCKED (1 << 7)
++#endif
++#ifndef SECBIT_EXEC_RESTRICT_FILE
++# define SECBIT_EXEC_RESTRICT_FILE (1 << 8)
++#endif
++#ifndef SECBIT_EXEC_RESTRICT_FILE_LOCKED
++# define SECBIT_EXEC_RESTRICT_FILE_LOCKED (1 << 9)
++#endif
++#ifndef SECBIT_EXEC_DENY_INTERACTIVE
++# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++#endif
++#ifndef SECBIT_EXEC_DENY_INTERACTIVE_LOCKED
++# define SECBIT_EXEC_DENY_INTERACTIVE_LOCKED (1 << 11)
++#endif
+ 
+ #define SETPRIV_EXIT_PRIVERR 127	/* how we exit when we fail to set privs */
+ 
+@@ -246,6 +264,18 @@ static void dump_securebits(void)
+ 	bits &= ~SECBIT_KEEP_CAPS;
+ 	dump_one_secbit(&first, &bits, SECBIT_KEEP_CAPS_LOCKED,
+ 			"keep_caps_locked");
++	dump_one_secbit(&first, &bits, SECBIT_NO_CAP_AMBIENT_RAISE,
++			"no_cap_ambient_raise");
++	dump_one_secbit(&first, &bits, SECBIT_NO_CAP_AMBIENT_RAISE_LOCKED,
++			"no_cap_ambient_raise_locked");
++	dump_one_secbit(&first, &bits, SECBIT_EXEC_RESTRICT_FILE,
++			"exec_restrict_file");
++	dump_one_secbit(&first, &bits, SECBIT_EXEC_RESTRICT_FILE_LOCKED,
++			"exec_restrict_file_locked");
++	dump_one_secbit(&first, &bits, SECBIT_EXEC_DENY_INTERACTIVE,
++			"exec_deny_interactive");
++	dump_one_secbit(&first, &bits, SECBIT_EXEC_DENY_INTERACTIVE_LOCKED,
++			"exec_deny_interactive_locked");
+ 	if (bits) {
+ 		if (first)
+ 			first = 0;
+@@ -621,6 +651,18 @@ static void parse_securebits(struct privctx *opts, const char *arg)
+ 				     _("adjusting keep_caps does not make sense"));
+ 			else if (!strcmp(c + 1, "keep_caps_locked"))
+ 				bit = SECBIT_KEEP_CAPS_LOCKED;	/* sigh */
++			else if (!strcmp(c + 1, "no_cap_ambient_raise"))
++				bit = SECBIT_NO_CAP_AMBIENT_RAISE;
++			else if (!strcmp(c + 1, "no_cap_ambient_raise_locked"))
++				bit = SECBIT_NO_CAP_AMBIENT_RAISE_LOCKED;
++			else if (!strcmp(c + 1, "exec_restrict_file"))
++				bit = SECBIT_EXEC_RESTRICT_FILE;
++			else if (!strcmp(c + 1, "exec_restrict_file_locked"))
++				bit = SECBIT_EXEC_RESTRICT_FILE_LOCKED;
++			else if (!strcmp(c + 1, "exec_deny_interactive"))
++				bit = SECBIT_EXEC_DENY_INTERACTIVE;
++			else if (!strcmp(c + 1, "exec_deny_interactive_locked"))
++				bit = SECBIT_EXEC_DENY_INTERACTIVE_LOCKED;
+ 			else
+ 				errx(EXIT_FAILURE, _("unrecognized securebit"));
+ 
