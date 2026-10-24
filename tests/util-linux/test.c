@@ -11,6 +11,7 @@
  * Usage: ./test <util-linux-bin-dir>
  */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <limits.h>
@@ -120,6 +121,37 @@ static pid_t spawn_userns(int *release)
     return pid;
 }
 
+/* Check that a new user namespace can map our UID, as unshare
+ * --map-root-user does. Some systems (e.g. Ubuntu's AppArmor userns
+ * restriction) allow creating one but deny writing the map. Returns 0
+ * or the errno of the failure. */
+static int can_map_uid(void)
+{
+    int fds[2];
+    if (pipe(fds) < 0) { perror("pipe"); exit(2); }
+
+    char map[64];
+    snprintf(map, sizeof(map), "0 %d 1", (int)getuid());
+
+    pid_t pid = fork();
+    if (pid < 0) { perror("fork"); exit(2); }
+    if (pid == 0) {
+        int fd, e = 0;
+        close(fds[0]);
+        if (unshare(CLONE_NEWUSER) < 0 ||
+            (fd = open("/proc/self/uid_map", O_WRONLY)) < 0 ||
+            write(fd, map, strlen(map)) < 0)
+            e = errno;
+        _exit(write(fds[1], &e, sizeof(e)) != sizeof(e));
+    }
+    close(fds[1]);
+    int e = EIO;
+    if (read(fds[0], &e, sizeof(e)) != sizeof(e)) e = EIO;
+    close(fds[0]);
+    waitpid(pid, NULL, 0);
+    return e;
+}
+
 int main(int argc, char **argv)
 {
     /* Re-executed under setpriv: succeed if the securebits match */
@@ -204,9 +236,14 @@ int main(int argc, char **argv)
         report(run((char *[]){ unshare_bin, "--user",
                                "--", self, "--secbits", bits, NULL }) == 0,
                "unshare --user keeps exec securebits");
-        report(run((char *[]){ unshare_bin, "--map-root-user",
-                               "--", self, "--secbits", bits, NULL }) == 0,
-               "unshare --map-root-user keeps exec securebits");
+        int map_err = can_map_uid();
+        if (map_err)
+            printf("SKIP: unshare --map-root-user: cannot write uid_map: %s\n",
+                   strerror(map_err));
+        else
+            report(run((char *[]){ unshare_bin, "--map-root-user",
+                                   "--", self, "--secbits", bits, NULL }) == 0,
+                   "unshare --map-root-user keeps exec securebits");
         report(run((char *[]){ nsenter_bin, "--user", "--preserve-credentials",
                                "--target", target_pid,
                                "--", self, "--secbits", bits, NULL }) == 0,
