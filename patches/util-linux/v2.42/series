@@ -3,3 +3,4 @@
 02-setpriv-improve-securebits-man-page.patch
 03-exec-aware-setpriv.patch
 04-exec-aware-enosys.patch
+05-exec-aware-userns.patch

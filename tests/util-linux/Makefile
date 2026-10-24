@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 CC             ?= gcc
-# Directory containing the patched setpriv and enosys
+# Directory containing the patched setpriv, enosys, unshare, and nsenter
 UTIL_LINUX_BIN ?= /usr/bin
 
 .PHONY: all check clean

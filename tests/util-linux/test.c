@@ -5,11 +5,15 @@
  */
 
 /*
- * Tests exec-awareness in util-linux's setpriv and enosys.
+ * Tests exec-awareness in util-linux's setpriv, enosys, unshare, and
+ * nsenter.
  *
  * Usage: ./test <util-linux-bin-dir>
  */
+#define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,10 +23,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define SECBIT_EXEC_RESTRICT_FILE    (1 << 8)
-#define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
+#define SECBIT_EXEC_RESTRICT_FILE           (1 << 8)
+#define SECBIT_EXEC_RESTRICT_FILE_LOCKED    (1 << 9)
+#define SECBIT_EXEC_DENY_INTERACTIVE        (1 << 10)
+#define SECBIT_EXEC_DENY_INTERACTIVE_LOCKED (1 << 11)
 
 static char setpriv[PATH_MAX], enosys[PATH_MAX];
+static char unshare_bin[PATH_MAX], nsenter_bin[PATH_MAX];
 static char dir[256], marker[PATH_MAX], filter[PATH_MAX];
 static int failures;
 
@@ -83,6 +90,68 @@ static void check_enosys(int want_run, const char *desc)
                                 "--", "touch", marker, NULL }, desc);
 }
 
+/* Fork a child that creates a user namespace and waits until *release
+ * is closed. Returns the child's PID, or -1 if it can't create one. */
+static pid_t spawn_userns(int *release)
+{
+    int ready[2], wait[2];
+    if (pipe(ready) < 0 || pipe(wait) < 0) { perror("pipe"); exit(2); }
+
+    pid_t pid = fork();
+    if (pid < 0) { perror("fork"); exit(2); }
+    if (pid == 0) {
+        char c = unshare(CLONE_NEWUSER) == 0;
+        close(ready[0]);
+        close(wait[1]);
+        if (write(ready[1], &c, 1) != 1) _exit(1);
+        /* Returns when the parent closes the pipe */
+        _exit(read(wait[0], &c, 1) < 0);
+    }
+    close(ready[1]);
+    close(wait[0]);
+    char ok = 0;
+    if (read(ready[0], &ok, 1) != 1) ok = 0;
+    close(ready[0]);
+    *release = wait[1];
+    if (!ok) {
+        close(wait[1]);
+        waitpid(pid, NULL, 0);
+        return -1;
+    }
+    return pid;
+}
+
+/* Check that a new user namespace can map our UID, as unshare
+ * --map-root-user does. Some systems (e.g. Ubuntu's AppArmor userns
+ * restriction) allow creating one but deny writing the map. Returns 0
+ * or the errno of the failure. */
+static int can_map_uid(void)
+{
+    int fds[2];
+    if (pipe(fds) < 0) { perror("pipe"); exit(2); }
+
+    char map[64];
+    snprintf(map, sizeof(map), "0 %d 1", (int)getuid());
+
+    pid_t pid = fork();
+    if (pid < 0) { perror("fork"); exit(2); }
+    if (pid == 0) {
+        int fd, e = 0;
+        close(fds[0]);
+        if (unshare(CLONE_NEWUSER) < 0 ||
+            (fd = open("/proc/self/uid_map", O_WRONLY)) < 0 ||
+            write(fd, map, strlen(map)) < 0)
+            e = errno;
+        _exit(write(fds[1], &e, sizeof(e)) != sizeof(e));
+    }
+    close(fds[1]);
+    int e = EIO;
+    if (read(fds[0], &e, sizeof(e)) != sizeof(e)) e = EIO;
+    close(fds[0]);
+    waitpid(pid, NULL, 0);
+    return e;
+}
+
 int main(int argc, char **argv)
 {
     /* Re-executed under setpriv: succeed if the securebits match */
@@ -95,6 +164,8 @@ int main(int argc, char **argv)
     }
     snprintf(setpriv, sizeof(setpriv), "%s/setpriv", argv[1]);
     snprintf(enosys, sizeof(enosys), "%s/enosys", argv[1]);
+    snprintf(unshare_bin, sizeof(unshare_bin), "%s/unshare", argv[1]);
+    snprintf(nsenter_bin, sizeof(nsenter_bin), "%s/nsenter", argv[1]);
 
     const char *tmp = getenv("TMPDIR");
     snprintf(dir, sizeof(dir), "%s/util-linux-exec-test-XXXXXX", tmp ? tmp : "/tmp");
@@ -145,6 +216,42 @@ int main(int argc, char **argv)
     report(run((char *[]){ enosys, "-s", "fallocate", "--dump", NULL }) == 0,
            "enosys --dump still runs");
     check_setpriv(1, "setpriv still loads executable filter");
+
+    /* === User namespaces ===
+     * Creating or joining one clears the securebits, so unshare and
+     * nsenter must set the exec ones again, locks included.
+     */
+    printf("=== User namespaces ===\n");
+    set_secbits(SECBIT_EXEC_RESTRICT_FILE_LOCKED | SECBIT_EXEC_DENY_INTERACTIVE_LOCKED);
+    snprintf(bits, sizeof(bits), "%d", prctl(PR_GET_SECUREBITS));
+
+    int release;
+    pid_t target = spawn_userns(&release);
+    if (target < 0) {
+        printf("SKIP: cannot create user namespaces\n");
+    } else {
+        char target_pid[32];
+        snprintf(target_pid, sizeof(target_pid), "%d", (int)target);
+
+        report(run((char *[]){ unshare_bin, "--user",
+                               "--", self, "--secbits", bits, NULL }) == 0,
+               "unshare --user keeps exec securebits");
+        int map_err = can_map_uid();
+        if (map_err)
+            printf("SKIP: unshare --map-root-user: cannot write uid_map: %s\n",
+                   strerror(map_err));
+        else
+            report(run((char *[]){ unshare_bin, "--map-root-user",
+                                   "--", self, "--secbits", bits, NULL }) == 0,
+                   "unshare --map-root-user keeps exec securebits");
+        report(run((char *[]){ nsenter_bin, "--user", "--preserve-credentials",
+                               "--target", target_pid,
+                               "--", self, "--secbits", bits, NULL }) == 0,
+               "nsenter --user keeps exec securebits");
+
+        close(release);
+        waitpid(target, NULL, 0);
+    }
 
     unlink(marker);
     unlink(filter);

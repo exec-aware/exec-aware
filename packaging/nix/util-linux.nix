@@ -28,6 +28,7 @@
         ../../patches/util-linux/v2.42/02-setpriv-improve-securebits-man-page.patch
         ../../patches/util-linux/v2.42/03-exec-aware-setpriv.patch
         ../../patches/util-linux/v2.42/04-exec-aware-enosys.patch
+        ../../patches/util-linux/v2.42/05-exec-aware-userns.patch
       ];
 
     # Regenerate the man pages that the patches change
