@@ -36,7 +36,7 @@ index 0a966d96e..988147ce0 100644
 +
  #endif /* CAPUTILS_H */
 diff --git a/lib/caputils.c b/lib/caputils.c
-index 6c71c06b8..74fb697ec 100644
+index 6c71c06b8..b7b2ebf8d 100644
 --- a/lib/caputils.c
 +++ b/lib/caputils.c
 @@ -124,6 +124,52 @@ void cap_permitted_to_ambient(void)
@@ -78,15 +78,15 @@ index 6c71c06b8..74fb697ec 100644
 +	if (!bits)
 +		return;
 +
++	/* Like the exec-aware programs themselves, don't fail when the
++	 * securebits are unavailable */
 +	cur = prctl(PR_GET_SECUREBITS, 0, 0, 0, 0);
-+	if (cur < 0)
-+		err(EXIT_FAILURE, _("prctl(PR_GET_SECUREBITS) failed"));
-+	if ((cur & bits) == bits)
++	if (cur < 0 || (cur & bits) == bits)
 +		return;
 +
 +	/* The exec securebits don't need CAP_SETPCAP */
 +	if (prctl(PR_SET_SECUREBITS, cur | bits, 0, 0, 0) < 0)
-+		err(EXIT_FAILURE, _("cannot restore exec securebits"));
++		warn(_("cannot restore exec securebits"));
 +}
 +
  #ifdef TEST_PROGRAM_CAPUTILS
