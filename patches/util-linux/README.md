@@ -39,6 +39,17 @@ chmod +x fallocate.bpf
 setpriv --seccomp-filter fallocate.bpf -- myprog
 ```
 
+## User namespaces
+
+The kernel resets the securebits of a process that creates or joins a
+user namespace, so `unshare --user` and `nsenter --user` would turn off
+the checks in the programs they run, even when the bits were locked.
+Both now set the exec securebits and their locks again after entering
+the namespace.
+These bits can be set without `CAP_SETPCAP`, so this works whether or not
+the process has capabilities in the namespace.
+The other securebits are left as the kernel sets them.
+
 ## Not patched
 
 `flock -c`, `script -c`, `scriptlive -c`, `su -c`, `runuser -c`, `newgrp`,

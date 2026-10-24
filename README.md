@@ -172,6 +172,8 @@ this particular gap: `enosys` refuses to load its filter when
 `SECBIT_EXEC_DENY_INTERACTIVE` is set, and `setpriv --seccomp-filter` only
 loads filter files that pass the executability check when
 `SECBIT_EXEC_RESTRICT_FILE` is set.
+They also make `unshare --user` and `nsenter --user` set the exec securebits
+again, since creating or joining a user namespace clears them.
 
 [Executability Check]: https://docs.kernel.org/userspace-api/check_exec.html
 [ClipOS]: https://clip-project.github.io/

@@ -1,0 +1,173 @@
+unshare, nsenter: keep the exec securebits in user namespaces
+
+From: Skye Soss <skye@soss.website>
+
+Creating or joining a user namespace resets the securebits to 0,
+including EXEC_RESTRICT_FILE, EXEC_DENY_INTERACTIVE, and their locks.
+`unshare --user` or `nsenter --user` therefore turns off the checks
+done by exec-aware programs, even when the bits were locked.
+
+Save the exec securebits before unshare() and setns(), and set them
+again afterwards. These bits can be set without CAP_SETPCAP, so this
+works whether or not the process has capabilities in the namespace.
+The other securebits are left as the kernel sets them, since restoring
+them would change what root can do in the new namespace.
+
+Assisted-by: Claude:claude-opus-5.5
+---
+ include/caputils.h       |    3 +++
+ lib/caputils.c           |   46 ++++++++++++++++++++++++++++++++++++++++++++++
+ sys-utils/nsenter.1.adoc |    2 ++
+ sys-utils/nsenter.c      |    5 +++++
+ sys-utils/unshare.1.adoc |    2 ++
+ sys-utils/unshare.c      |    4 ++++
+ 6 files changed, 62 insertions(+)
+
+diff --git a/include/caputils.h b/include/caputils.h
+index 0a966d96e..988147ce0 100644
+--- a/include/caputils.h
++++ b/include/caputils.h
+@@ -32,4 +32,7 @@ extern int cap_last_cap(void);
+ 
+ extern void cap_permitted_to_ambient(void);
+ 
++extern int get_exec_securebits(void);
++extern void restore_exec_securebits(int bits);
++
+ #endif /* CAPUTILS_H */
+diff --git a/lib/caputils.c b/lib/caputils.c
+index 6c71c06b8..74fb697ec 100644
+--- a/lib/caputils.c
++++ b/lib/caputils.c
+@@ -124,6 +124,52 @@ void cap_permitted_to_ambient(void)
+ 	}
+ }
+ 
++#ifndef SECBIT_EXEC_RESTRICT_FILE
++# define SECBIT_EXEC_RESTRICT_FILE (1 << 8)
++#endif
++#ifndef SECBIT_EXEC_RESTRICT_FILE_LOCKED
++# define SECBIT_EXEC_RESTRICT_FILE_LOCKED (1 << 9)
++#endif
++#ifndef SECBIT_EXEC_DENY_INTERACTIVE
++# define SECBIT_EXEC_DENY_INTERACTIVE (1 << 10)
++#endif
++#ifndef SECBIT_EXEC_DENY_INTERACTIVE_LOCKED
++# define SECBIT_EXEC_DENY_INTERACTIVE_LOCKED (1 << 11)
++#endif
++
++#define SECBIT_EXEC_ALL (SECBIT_EXEC_RESTRICT_FILE | \
++			 SECBIT_EXEC_RESTRICT_FILE_LOCKED | \
++			 SECBIT_EXEC_DENY_INTERACTIVE | \
++			 SECBIT_EXEC_DENY_INTERACTIVE_LOCKED)
++
++/* Creating or joining a user namespace resets the securebits, which
++ * turns off the checks done by exec-aware programs. Save the exec
++ * securebits (and their locks) before, and restore them after. */
++int get_exec_securebits(void)
++{
++	int bits = prctl(PR_GET_SECUREBITS, 0, 0, 0, 0);
++
++	return bits < 0 ? 0 : bits & SECBIT_EXEC_ALL;
++}
++
++void restore_exec_securebits(int bits)
++{
++	int cur;
++
++	if (!bits)
++		return;
++
++	cur = prctl(PR_GET_SECUREBITS, 0, 0, 0, 0);
++	if (cur < 0)
++		err(EXIT_FAILURE, _("prctl(PR_GET_SECUREBITS) failed"));
++	if ((cur & bits) == bits)
++		return;
++
++	/* The exec securebits don't need CAP_SETPCAP */
++	if (prctl(PR_SET_SECUREBITS, cur | bits, 0, 0, 0) < 0)
++		err(EXIT_FAILURE, _("cannot restore exec securebits"));
++}
++
+ #ifdef TEST_PROGRAM_CAPUTILS
+ int main(int argc, char *argv[])
+ {
+diff --git a/sys-utils/nsenter.1.adoc b/sys-utils/nsenter.1.adoc
+index 34fde93ac..569bccaa1 100644
+--- a/sys-utils/nsenter.1.adoc
++++ b/sys-utils/nsenter.1.adoc
+@@ -108,6 +108,8 @@ Enter the PID namespace. If no argument is specified, enter the PID namespace of
+ 
+ *-U*, *--user*[**=**_file_|**=:**_nsid_]::
+ Enter the user namespace. If no argument is specified, enter the user namespace of the target process. If _file_ or **:**_nsid_ is specified, enter the user namespace specified by _file_ or _nsid_. See also the *--setuid* and *--setgid* options.
+++
++The kernel clears the securebits of a process that joins a user namespace. *nsenter* restores the *exec_restrict_file* and *exec_deny_interactive* securebits and their locks in the entered namespace, so they still apply to _program_ (see *setpriv*(1)).
+ 
+ *--user-parent*::
+ Enter the parent user namespace. Parent user namespace will be acquired from any other enabled namespace.
+diff --git a/sys-utils/nsenter.c b/sys-utils/nsenter.c
+index f449c65d2..5485c8e2d 100644
+--- a/sys-utils/nsenter.c
++++ b/sys-utils/nsenter.c
+@@ -644,6 +644,7 @@ int main(int argc, char *argv[])
+ 	uid_t uid = 0;
+ 	gid_t gid = 0;
+ 	int keepcaps = 0;
++	int exec_secbits;
+ 	int sock_fd = -1;
+ 	int pid_fd = -1;
+ #ifdef HAVE_LIBSELINUX
+@@ -855,12 +856,16 @@ int main(int argc, char *argv[])
+ 	 * namespace last and if we're privileging it then we enter the user
+ 	 * namespace first (because the initial setns will fail).
+ 	 */
++	exec_secbits = get_exec_securebits();
+ 	enter_namespaces(pid_fd, namespaces & ~CLONE_NEWUSER, 1);	/* ignore errors */
+ 
+ 	namespaces = get_namespaces();
+ 	if (namespaces)
+ 		enter_namespaces(pid_fd, namespaces, 0);		/* report errors */
+ 
++	/* Joining a user namespace resets the securebits */
++	restore_exec_securebits(exec_secbits);
++
+ 	if (pid_fd >= 0)
+ 		close(pid_fd);
+ 
+diff --git a/sys-utils/unshare.1.adoc b/sys-utils/unshare.1.adoc
+index 888928147..8d4e2b057 100644
+--- a/sys-utils/unshare.1.adoc
++++ b/sys-utils/unshare.1.adoc
+@@ -71,6 +71,8 @@ Create a new UTS namespace. If _file_ is specified, then the namespace is made p
+ 
+ *-U*, *--user*[**=**__file__]::
+ Create a new user namespace. If _file_ is specified, then the namespace is made persistent by creating a bind mount at _file_.
+++
++The kernel clears the securebits of a process that creates a user namespace. *unshare* restores the *exec_restrict_file* and *exec_deny_interactive* securebits and their locks in the new namespace, so they still apply to _program_ (see *setpriv*(1)).
+ 
+ *-C*, *--cgroup*[**=**__file__]::
+ Create a new cgroup namespace. If _file_ is specified, then the namespace is made persistent by creating a bind mount at _file_.
+diff --git a/sys-utils/unshare.c b/sys-utils/unshare.c
+index 5d851e786..25ea6a3b4 100644
+--- a/sys-utils/unshare.c
++++ b/sys-utils/unshare.c
+@@ -883,6 +883,7 @@ int main(int argc, char *argv[])
+ 	uid_t uid = 0, real_euid = geteuid();
+ 	gid_t gid = 0, real_egid = getegid();
+ 	int keepcaps = 0;
++	int exec_secbits;
+ 	int64_t monotonic = 0;
+ 	int64_t boottime = 0;
+ 	int force_monotonic = 0;
+@@ -1106,8 +1107,11 @@ int main(int argc, char *argv[])
+ 	if (owneruser != (uid_t) -1 && setuid(owneruser) != 0)
+ 		err(EXIT_FAILURE, _("setuid() failed"));
+ 
++	/* A new user namespace starts without securebits */
++	exec_secbits = get_exec_securebits();
+ 	if (-1 == unshare(unshare_flags))
+ 		err(EXIT_FAILURE, _("unshare failed"));
++	restore_exec_securebits(exec_secbits);
+ 
+ 	/* Tell child we've called unshare() */
+ 	if (usermap || groupmap)
